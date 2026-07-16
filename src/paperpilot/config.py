@@ -76,10 +76,16 @@ class Settings(BaseSettings):
 
     # -- LLM (Milestone 3+) --
     llm_provider: str = "openai"
+    llm_model_name: str = "gpt-4o-mini"
+    llm_temperature: float = 0.0
     openai_api_key: str = ""
 
     # -- Academic Search (Milestone 4+) --
     semantic_scholar_api_key: str = ""
+    search_weight_similarity: float = 0.5
+    search_weight_citations: float = 0.3
+    search_weight_recency: float = 0.2
+    search_decay_rate: float = 0.05
 
     model_config = {
         # Read from .env file in the project root
