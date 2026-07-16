@@ -1,0 +1,758 @@
+# Project Research Document
+
+# Project Name
+
+**PaperPilot AI**
+*An Autonomous Multi-Agent Research Assistant for Discovering, Understanding and Learning Research Papers.*
+
+---
+
+# Vision
+
+PaperPilot AI is an autonomous multi-agent research assistant that helps users learn any technical topic by discovering the most relevant research papers, understanding their contents, connecting ideas across multiple papers, and answering questions grounded entirely in the retrieved literature.
+
+Unlike a traditional "Chat with PDF" application, PaperPilot AI is designed to become an intelligent research companion capable of acting like a graduate research assistant.
+
+Instead of simply retrieving chunks from PDFs, the system will:
+
+* Search academic literature.
+* Rank papers by relevance.
+* Download papers automatically.
+* Read and understand papers.
+* Build retrieval indexes.
+* Summarize papers at multiple levels.
+* Explain difficult concepts.
+* Compare multiple papers.
+* Generate learning roadmaps.
+* Remember previous research sessions.
+* Plan future learning paths.
+
+The long-term objective is to understand and implement modern Agentic AI systems while simultaneously learning Retrieval-Augmented Generation (RAG), agent orchestration, memory systems, tool usage, prompt engineering, document understanding, and LLM workflows.
+
+---
+
+# Primary Goal
+
+Build a production-quality AI research assistant completely from scratch while understanding every component used.
+
+The project should prioritize learning over speed.
+
+Every abstraction used should be understood before it is adopted.
+
+---
+
+# Learning Goals
+
+By the end of the project we should understand:
+
+* Agentic AI
+* LangChain
+* LangGraph
+* Retrieval-Augmented Generation
+* Embeddings
+* Vector Databases
+* Semantic Search
+* Tool Calling
+* Function Calling
+* Multi-Agent Systems
+* Reflection Agents
+* Planning Agents
+* Long-Term Memory
+* Prompt Engineering
+* Context Engineering
+* Academic Search APIs
+* PDF Parsing
+* Document Chunking
+* Ranking Systems
+* Knowledge Graph concepts (future)
+* MCP (future)
+* AI Evaluation
+* AI Security Basics
+
+---
+
+# Core Philosophy
+
+The project is not a wrapper around GPT.
+
+The LLM should act as one component inside an intelligent system.
+
+The intelligence comes from:
+
+* planning
+* retrieval
+* memory
+* reasoning
+* tools
+* orchestration
+* evaluation
+
+rather than simply asking GPT for answers.
+
+---
+
+# High-Level User Workflow
+
+User enters a topic.
+
+↓
+
+System discovers relevant papers.
+
+↓
+
+System ranks papers.
+
+↓
+
+User selects one or more papers.
+
+↓
+
+System downloads PDFs.
+
+↓
+
+System extracts text.
+
+↓
+
+System builds embeddings.
+
+↓
+
+System creates a vector database.
+
+↓
+
+System generates structured summaries.
+
+↓
+
+User chats with papers.
+
+↓
+
+Agent answers questions grounded in retrieved context.
+
+↓
+
+Agent remembers session.
+
+↓
+
+Agent recommends what to read next.
+
+---
+
+# Complete Feature Roadmap
+
+## Phase 1 — Academic Paper Discovery
+
+The user provides any research topic.
+
+Examples:
+
+* Vision Transformers
+* RAG
+* Diffusion Models
+* Graph Neural Networks
+* Reinforcement Learning
+* Federated Learning
+
+The Search Agent should automatically query academic databases.
+
+Possible providers:
+
+* Semantic Scholar
+* arXiv
+* OpenAlex
+* Crossref
+
+Each paper should contain:
+
+* Title
+* Authors
+* Publication Year
+* Citation Count
+* Abstract
+* DOI
+* PDF Link
+* Source
+* Venue
+* Keywords
+
+The system should rank papers using a weighted scoring algorithm considering:
+
+* semantic similarity
+* citations
+* recency
+* relevance
+* popularity
+
+---
+
+## Phase 2 — Intelligent Paper Selection
+
+The agent should determine:
+
+* foundational papers
+* survey papers
+* influential papers
+* recent breakthroughs
+
+Example:
+
+Topic:
+
+Transformers
+
+Instead of showing random papers, the system might recommend:
+
+Attention Is All You Need
+
+↓
+
+BERT
+
+↓
+
+GPT
+
+↓
+
+Vision Transformer
+
+↓
+
+Modern LLM papers
+
+forming a logical learning sequence.
+
+---
+
+## Phase 3 — Automatic PDF Processing
+
+Selected papers should be downloaded automatically.
+
+Pipeline:
+
+Download PDF
+
+↓
+
+Extract text
+
+↓
+
+Clean formatting
+
+↓
+
+Remove references (optional)
+
+↓
+
+Extract sections
+
+↓
+
+Store metadata
+
+↓
+
+Create chunks
+
+↓
+
+Generate embeddings
+
+↓
+
+Store vector index
+
+---
+
+# RAG Engine
+
+The existing Chat with PDF project becomes a subsystem.
+
+Pipeline:
+
+PDF
+
+↓
+
+Chunks
+
+↓
+
+Embeddings
+
+↓
+
+Vector Database
+
+↓
+
+Retriever
+
+↓
+
+Relevant Context
+
+↓
+
+LLM
+
+↓
+
+Grounded Answer
+
+No hallucinated answers should be produced whenever possible.
+
+The assistant must always answer using retrieved evidence.
+
+---
+
+# Multi-Level Summarization
+
+Each paper should automatically generate:
+
+## Quick Summary
+
+Five sentences.
+
+---
+
+## Beginner Summary
+
+Explain like an undergraduate student.
+
+---
+
+## Technical Summary
+
+Research-level explanation.
+
+---
+
+## Key Contributions
+
+Bullet points.
+
+---
+
+## Methodology
+
+Explain the proposed algorithm.
+
+---
+
+## Experimental Results
+
+Summarize evaluation.
+
+---
+
+## Limitations
+
+Weaknesses of the paper.
+
+---
+
+## Future Work
+
+Potential research directions.
+
+---
+
+## Implementation Guide
+
+Explain how someone could reproduce the paper.
+
+---
+
+## Prerequisites
+
+Concepts required before reading.
+
+---
+
+## Glossary
+
+Explain technical terminology.
+
+---
+
+# Chat With Paper
+
+The user should be able to ask:
+
+Explain Section 3.
+
+Explain Equation 5.
+
+Why did the authors choose this architecture?
+
+Explain like I'm five.
+
+Explain mathematically.
+
+Generate interview questions.
+
+Generate exam questions.
+
+Generate implementation roadmap.
+
+Explain assumptions.
+
+Generate examples.
+
+Compare this with CNNs.
+
+Everything should remain grounded in retrieved context.
+
+---
+
+# Multi-Paper Workspace
+
+Users should be able to load multiple papers simultaneously.
+
+Example:
+
+5 Transformer papers.
+
+Questions:
+
+Compare Paper A and B.
+
+What changed over time?
+
+Which ideas are reused?
+
+Which architecture performs best?
+
+Which should I read first?
+
+Generate timeline.
+
+Create comparison table.
+
+Find contradictions.
+
+Generate combined summary.
+
+Identify research gaps.
+
+---
+
+# Learning Roadmap Generator
+
+Given a topic:
+
+The planner agent should recommend:
+
+Beginner Papers
+
+↓
+
+Intermediate Papers
+
+↓
+
+Advanced Papers
+
+↓
+
+Implementation Projects
+
+↓
+
+Related Topics
+
+↓
+
+Suggested Next Research Areas
+
+---
+
+# Multi-Agent Architecture
+
+## 1. Planner Agent
+
+Responsibilities:
+
+Understand user goal.
+
+Break into subtasks.
+
+Decide execution order.
+
+Select required agents.
+
+---
+
+## 2. Search Agent
+
+Responsibilities:
+
+Search APIs.
+
+Retrieve candidate papers.
+
+Rank papers.
+
+Remove duplicates.
+
+Return best results.
+
+---
+
+## 3. Retrieval Agent
+
+Responsibilities:
+
+Download PDFs.
+
+Extract text.
+
+Chunk documents.
+
+Generate embeddings.
+
+Maintain vector stores.
+
+---
+
+## 4. Summarizer Agent
+
+Responsibilities:
+
+Generate structured summaries.
+
+Produce beginner and expert explanations.
+
+Extract important information.
+
+---
+
+## 5. Tutor Agent
+
+Responsibilities:
+
+Answer user questions.
+
+Teach concepts.
+
+Adjust explanation difficulty.
+
+Generate quizzes.
+
+Suggest prerequisite learning.
+
+---
+
+## 6. Comparison Agent
+
+Responsibilities:
+
+Compare multiple papers.
+
+Highlight similarities.
+
+Highlight differences.
+
+Find improvements.
+
+Explain evolution.
+
+---
+
+## 7. Critic Agent
+
+Responsibilities:
+
+Evaluate generated answers.
+
+Check completeness.
+
+Detect hallucinations.
+
+Suggest improvements.
+
+Trigger retries when necessary.
+
+---
+
+## 8. Memory Agent
+
+Responsibilities:
+
+Remember:
+
+* previous topics
+* papers read
+* user preferences
+* conversation history
+* completed learning paths
+
+---
+
+# LangGraph Workflow
+
+The agents should be orchestrated using LangGraph.
+
+Graph example:
+
+User
+
+↓
+
+Planner
+
+↓
+
+Search
+
+↓
+
+Paper Selection
+
+↓
+
+Retriever
+
+↓
+
+Summarizer
+
+↓
+
+Tutor
+
+↓
+
+Critic
+
+↓
+
+Final Response
+
+State should flow through the graph while preserving memory and execution history.
+
+---
+
+# LangChain Usage
+
+LangChain will provide reusable building blocks rather than hiding the system.
+
+Potential components:
+
+* Document Loaders
+* Text Splitters
+* Embedding Interfaces
+* Retrievers
+* Vector Store Integrations
+* Prompt Templates
+* Output Parsers
+* Tool Abstractions
+* Conversation Memory (where appropriate)
+
+We should understand each abstraction before using it.
+
+---
+
+# Future Enhancements
+
+* Long-term memory across sessions
+* Knowledge Graph generation
+* Neo4j integration
+* MCP server support
+* Local LLM compatibility
+* Offline mode
+* Voice interaction
+* OCR for scanned PDFs
+* Research notebook
+* Citation generation
+* Automatic literature reviews
+* AI-generated flashcards
+* Interactive diagrams
+* Paper recommendation engine
+* Benchmark extraction
+* Figure and table understanding
+* Mathematical equation interpretation
+* Research trend visualization
+* Reading progress tracking
+* Collaborative workspaces
+
+---
+
+# Suggested Technology Stack
+
+Backend:
+
+* Python
+* FastAPI
+
+Agent Framework:
+
+* LangGraph
+* LangChain
+
+LLMs:
+
+* OpenAI-compatible models (configurable)
+
+Embeddings:
+
+* Sentence Transformers (initially)
+
+Vector Database:
+
+* FAISS (initially)
+
+Database:
+
+* PostgreSQL or SQLite for metadata
+
+Caching:
+
+* Redis (future)
+
+Frontend:
+
+* Streamlit initially
+* React later (optional)
+
+Libraries:
+
+* Pydantic
+* PyMuPDF
+* arXiv
+* Semantic Scholar/OpenAlex APIs
+* Pandas
+* NumPy
+
+---
+
+# Development Principles
+
+1. Build incrementally.
+2. Understand every dependency.
+3. Prefer official documentation over tutorials.
+4. Write modular, testable code.
+5. Keep agents independent and composable.
+6. Validate outputs whenever possible.
+7. Design for extensibility.
+8. Document architectural decisions.
+9. Avoid "magic" abstractions without understanding them.
+10. Optimize for learning first and performance second.
+
+---
+
+# Final Objective
+
+By the completion of PaperPilot AI, the project should evolve from a simple research-paper search tool into a full-fledged autonomous research companion capable of discovering knowledge, understanding scientific literature, teaching complex concepts, comparing research, maintaining long-term context, and guiding users through an entire learning journey.
+
+More importantly, every subsystem should serve as a practical exploration of modern AI engineering, ensuring that the project becomes both a powerful research tool and a comprehensive educational platform for mastering contemporary LLM systems.
