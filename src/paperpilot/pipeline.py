@@ -112,6 +112,14 @@ class DocumentPipeline:
         # with all their metadata (text, page numbers, etc.).
         self._chunk_registry: dict[str, TextChunk] = {}
 
+        # Initialize downloader and sync providers
+        from paperpilot.document.downloader import PDFDownloader
+        from paperpilot.search.providers import ArxivProvider, SemanticScholarProvider
+        settings = get_settings()
+        self.downloader = PDFDownloader(papers_dir=settings.papers_dir)
+        self.arxiv_provider = ArxivProvider()
+        self.semantic_scholar_provider = SemanticScholarProvider()
+
         # If a workspace is specified, load it
         if self.workspace_id and self.db_manager:
             self.load_workspace(self.workspace_id)
@@ -340,5 +348,120 @@ class DocumentPipeline:
         answer = self.tutor.answer_question(query, chunks, difficulty=difficulty)
 
         return answer
+
+    def download_and_process_pdf(
+        self,
+        paper_id: UUID,
+        pdf_url: str,
+        metadata: PaperMetadata | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+    ) -> ProcessedDocument:
+        """Download a PDF file from a URL, then process and index it in the pipeline."""
+        logger.info("Downloading and processing PDF for paper %s from %s", paper_id, pdf_url)
+        local_path = self.downloader.download_pdf(paper_id, pdf_url)
+
+        if metadata:
+            metadata.paper_id = paper_id
+
+        return self.process_pdf(
+            local_path,
+            metadata=metadata,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+
+    def sync_paper_metadata(self, paper_id: UUID) -> PaperMetadata:
+        """Sync and update paper metadata from external providers (arXiv/Semantic Scholar)."""
+        if not self.db_manager:
+            raise ValueError("WorkspaceManager must be configured in DocumentPipeline to sync metadata.")
+
+        # 1. Fetch current paper metadata from database
+        papers = self.db_manager.get_workspace_papers(self.workspace_id)
+        current_paper = next((p for p in papers if p.paper_id == paper_id), None)
+        if not current_paper:
+            # Check if paper exists generally in the papers table
+            with self.db_manager._get_connection() as conn:
+                row = conn.execute("SELECT * FROM papers WHERE paper_id = ?;", (str(paper_id),)).fetchone()
+                if not row:
+                    raise ValueError(f"Paper with ID {paper_id} not found in database.")
+                import json
+                from datetime import datetime
+                from paperpilot.core.models import PaperSource
+                current_paper = PaperMetadata(
+                    paper_id=UUID(row["paper_id"]),
+                    title=row["title"],
+                    authors=json.loads(row["authors"]) if row["authors"] else [],
+                    publication_year=row["publication_year"],
+                    citation_count=row["citation_count"],
+                    abstract=row["abstract"],
+                    doi=row["doi"],
+                    pdf_url=row["pdf_url"],
+                    source=PaperSource(row["source"]),
+                    venue=row["venue"],
+                    keywords=json.loads(row["keywords"]) if row["keywords"] else [],
+                    discovered_at=datetime.fromisoformat(row["discovered_at"]),
+                )
+
+        logger.info("Syncing metadata for paper: '%s'", current_paper.title)
+
+        # 2. Extract identifiers (ArXiv ID or DOI)
+        import re
+        arxiv_id = None
+        # Check keywords
+        if current_paper.keywords:
+            for kw in current_paper.keywords:
+                if kw != "arxiv" and kw != "semanticscholar" and re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", kw):
+                    arxiv_id = kw.split("v")[0]
+                    break
+        # Check URL
+        if not arxiv_id and current_paper.pdf_url and "arxiv.org" in current_paper.pdf_url:
+            match = re.search(r"/pdf/(\d{4}\.\d{4,5})", current_paper.pdf_url)
+            if match:
+                arxiv_id = match.group(1)
+            else:
+                match = re.search(r"/abs/(\d{4}\.\d{4,5})", current_paper.pdf_url)
+                if match:
+                    arxiv_id = match.group(1)
+
+        refreshed_meta = None
+
+        # 3. Fetch latest from providers
+        # First priority: Semantic Scholar via DOI
+        if current_paper.doi:
+            logger.info("Attempting Semantic Scholar metadata sync using DOI: %s", current_paper.doi)
+            refreshed_meta = self.semantic_scholar_provider.get_paper_by_doi(current_paper.doi)
+
+        # Second priority: Semantic Scholar via ArXiv ID
+        if not refreshed_meta and arxiv_id:
+            logger.info("Attempting Semantic Scholar metadata sync using ArXiv ID: %s", arxiv_id)
+            refreshed_meta = self.semantic_scholar_provider.get_paper_by_arxiv(arxiv_id)
+
+        # Third priority: ArXiv via ArXiv ID
+        if not refreshed_meta and arxiv_id:
+            logger.info("Attempting ArXiv metadata sync using ArXiv ID: %s", arxiv_id)
+            refreshed_meta = self.arxiv_provider.get_paper_by_id(arxiv_id)
+
+        if not refreshed_meta:
+            logger.warning("Could not retrieve refreshed metadata from providers for: '%s'", current_paper.title)
+            return current_paper
+
+        # 4. Update fields on current paper
+        current_paper.title = refreshed_meta.title or current_paper.title
+        current_paper.authors = refreshed_meta.authors or current_paper.authors
+        current_paper.publication_year = refreshed_meta.publication_year or current_paper.publication_year
+        current_paper.citation_count = refreshed_meta.citation_count or current_paper.citation_count
+        current_paper.abstract = refreshed_meta.abstract or current_paper.abstract
+        current_paper.doi = refreshed_meta.doi or current_paper.doi
+        current_paper.pdf_url = refreshed_meta.pdf_url or current_paper.pdf_url
+        current_paper.venue = refreshed_meta.venue or current_paper.venue
+
+        # Merge keywords
+        merged_kws = list(set(current_paper.keywords + refreshed_meta.keywords))
+        current_paper.keywords = merged_kws
+
+        # 5. Persist to database
+        self.db_manager.update_paper_metadata(current_paper)
+        return current_paper
 
 

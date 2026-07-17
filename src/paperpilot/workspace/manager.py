@@ -310,3 +310,40 @@ class WorkspaceManager:
                     )
                 )
             return chunks
+
+    def update_paper_metadata(self, paper: PaperMetadata) -> None:
+        """Update an existing paper's metadata in the database.
+
+        Args:
+            paper: Updated PaperMetadata object.
+        """
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE papers SET
+                    title = ?,
+                    authors = ?,
+                    publication_year = ?,
+                    citation_count = ?,
+                    abstract = ?,
+                    doi = ?,
+                    pdf_url = ?,
+                    venue = ?,
+                    keywords = ?
+                WHERE paper_id = ?;
+                """,
+                (
+                    paper.title,
+                    json.dumps(paper.authors),
+                    paper.publication_year,
+                    paper.citation_count,
+                    paper.abstract,
+                    paper.doi,
+                    paper.pdf_url,
+                    paper.venue,
+                    json.dumps(paper.keywords),
+                    str(paper.paper_id),
+                ),
+            )
+            conn.commit()
+            logger.info("Updated paper metadata in database for: '%s'", paper.title)

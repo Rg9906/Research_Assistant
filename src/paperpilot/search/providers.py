@@ -58,6 +58,39 @@ class ArxivProvider:
         self._client = arxiv.Client()
         logger.info("ArxivProvider initialized.")
 
+    def get_paper_by_id(self, arxiv_id: str) -> PaperMetadata | None:
+        """Fetch paper metadata from arXiv by arXiv ID."""
+        logger.info("Arxiv fetch initiated for ID: '%s'", arxiv_id)
+        
+        # Strip any version suffix (e.g., "1706.03762v5" -> "1706.03762")
+        clean_id = arxiv_id.split("v")[0]
+        search_query = arxiv.Search(id_list=[clean_id])
+        
+        try:
+            results = list(self._client.results(search_query))
+            if not results:
+                logger.warning("No arXiv paper found for ID: %s", clean_id)
+                return None
+            res = results[0]
+            authors = [a.name for a in res.authors]
+            
+            return PaperMetadata(
+                paper_id=uuid4(),
+                title=res.title,
+                authors=authors,
+                publication_year=res.published.year if res.published else None,
+                citation_count=None,
+                abstract=res.summary,
+                doi=res.doi,
+                pdf_url=res.pdf_url,
+                source=PaperSource.ARXIV,
+                venue="arXiv Preprint",
+                keywords=["arxiv", clean_id],
+            )
+        except Exception as e:
+            logger.error("Arxiv fetch failed for ID %s: %s", clean_id, e)
+            return None
+
     def search(self, query: str, limit: int = 10) -> list[PaperMetadata]:
         """Query arXiv and parse results into PaperMetadata.
 
@@ -139,6 +172,67 @@ class SemanticScholarProvider:
         if api_key:
             self._headers["x-api-key"] = api_key
         logger.info("SemanticScholarProvider initialized.")
+
+    def get_paper_by_doi(self, doi: str) -> PaperMetadata | None:
+        """Fetch paper metadata from Semantic Scholar by DOI."""
+        return self._get_paper_by_external_id(f"DOI:{doi}")
+
+    def get_paper_by_arxiv(self, arxiv_id: str) -> PaperMetadata | None:
+        """Fetch paper metadata from Semantic Scholar by ArXiv ID."""
+        # Strip version suffix
+        clean_id = arxiv_id.split("v")[0]
+        return self._get_paper_by_external_id(f"arXiv:{clean_id}")
+
+    def _get_paper_by_external_id(self, ext_id: str) -> PaperMetadata | None:
+        logger.info("Semantic Scholar fetch initiated for external ID: '%s'", ext_id)
+        url = f"https://api.semanticscholar.org/graph/v1/paper/{ext_id}"
+        fields = "title,authors,year,citationCount,abstract,externalIds,openAccessPdf,venue,s2FieldsOfStudy"
+        params = {"fields": fields}
+        try:
+            with httpx.Client(headers=self._headers, timeout=15.0) as client:
+                response = client.get(url, params=params)
+                if response.status_code == 404:
+                    logger.warning("No Semantic Scholar paper found for external ID: %s", ext_id)
+                    return None
+                if response.status_code == 429:
+                    logger.warning("Semantic Scholar rate limited (429) on external ID fetch.")
+                    return None
+                response.raise_for_status()
+                item = response.json()
+
+            authors = [a.get("name") for a in item.get("authors", []) if a.get("name")]
+            ext_ids = item.get("externalIds", {})
+            doi = ext_ids.get("DOI")
+            arxiv_id = ext_ids.get("ArXiv")
+
+            pdf_url = None
+            oa_pdf = item.get("openAccessPdf")
+            if oa_pdf and isinstance(oa_pdf, dict):
+                pdf_url = oa_pdf.get("url")
+
+            keywords = ["semanticscholar"]
+            if arxiv_id:
+                keywords.append(arxiv_id)
+            fields_of_study = item.get("s2FieldsOfStudy")
+            if fields_of_study:
+                keywords.extend([str(f).lower() for f in fields_of_study])
+
+            return PaperMetadata(
+                paper_id=uuid4(),
+                title=item.get("title", ""),
+                authors=authors,
+                publication_year=item.get("year"),
+                citation_count=item.get("citationCount"),
+                abstract=item.get("abstract"),
+                doi=doi,
+                pdf_url=pdf_url,
+                source=PaperSource.SEMANTIC_SCHOLAR,
+                venue=item.get("venue"),
+                keywords=keywords,
+            )
+        except Exception as e:
+            logger.error("Semantic Scholar fetch failed for external ID %s: %s", ext_id, e)
+            return None
 
     def search(self, query: str, limit: int = 10) -> list[PaperMetadata]:
         """Query Semantic Scholar and parse results into PaperMetadata.

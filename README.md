@@ -105,7 +105,7 @@ src/paperpilot/
 
 *   [x] **Milestone 6**: Expanding Planner, Tutor, and Critic agents for multi-step execution plans and hierarchical critique audits.
 *   [x] **Milestone 7**: Workspace Management (managing multiple papers in a single workspace database).
-*   [ ] **Milestone 8**: Direct PDF Downloader and metadata sync.
+*   [x] **Milestone 8**: Direct PDF Downloader and metadata sync.
 *   [ ] **Milestone 9**: Interactive Frontend (Streamlit or React/Vite dashboard).
 
 ---
