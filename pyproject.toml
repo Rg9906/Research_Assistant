@@ -19,6 +19,8 @@ dependencies = [
     "langchain-openai>=0.1,<0.3",
     "arxiv>=2.1,<3.0",
     "langgraph>=0.1.0,<0.3.0",
+    "fastapi>=0.100,<1.0",
+    "uvicorn>=0.23,<1.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,856 @@
+<USER_REQUEST>
+<!-- Design System -->
+# Project Research Document
+# Project Name
+**PaperPilot AI**
+*An Autonomous Multi-Agent Research Assistant for Discovering, Understanding and Learning Research Papers.*
+---
+# Vision
+PaperPilot AI is an autonomous multi-agent research assistant that helps users learn any technical topic by discovering the most relevant research papers, understanding their contents, connecting ideas across multiple papers, and answering questions grounded entirely in the retrieved literature.
+... [Full content of user's PRD] ...
+
+
+<!-- PaperPilot AI PRD -->
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>PaperPilot AI - Discovery Feed</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@600;700;800&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;1,8..60,400&amp;display=swap" rel="stylesheet">
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed": "#84f5ee",
+                        "surface-container-highest": "#e0e3e5",
+                        "on-primary-fixed": "#001b3c",
+                        "on-tertiary-fixed-variant": "#004a78",
+                        "on-primary-container": "#86a0cd",
+                        "inverse-surface": "#2d3133",
+                        "on-error-container": "#93000a",
+                        "surface-container-high": "#e5e9eb",
+                        "tertiary-fixed": "#cfe5ff",
+                        "inverse-primary": "#adc7f7",
+                        "error": "#ba1a1a",
+                        "secondary-fixed-dim": "#66d8d2",
+                        "surface": "#f7fafc",
+                        "primary-fixed-dim": "#adc7f7",
+                        "on-background": "#181c1e",
+                        "tertiary-container": "#00385d",
+                        "surface-variant": "#e0e3e5",
+                        "outline-variant": "#c4c6cf",
+                        "on-surface": "#181c1e",
+                        "on-tertiary-fixed": "#001d34",
+                        "on-primary-fixed-variant": "#2d476f",
+                        "on-surface-variant": "#43474e",
+                        "surface-tint": "#455f88",
+                        "surface-container-low": "#f1f4f6",
+                        "error-container": "#ffdad6",
+                        "primary-container": "#1a365d",
+                        "inverse-on-surface": "#eef1f3",
+                        "surface-container-lowest": "#ffffff",
+                        "background": "#f7fafc",
+                        "on-error": "#ffffff",
+                        "surface-dim": "#d7dadc",
+                        "surface-bright": "#f7fafc",
+                        "surface-container": "#ebeef0",
+                        "on-secondary-fixed-variant": "#00504d",
+                        "secondary": "#006a66",
+                        "tertiary": "#00223b",
+                        "on-primary": "#ffffff",
+                        "on-secondary-container": "#006f6a",
+                        "primary": "#002045",
+                        "on-secondary": "#ffffff",
+                        "outline": "#74777f",
+                        "on-tertiary-container": "#4fa4ed",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary-fixed": "#00201e",
+                        "tertiary-fixed-dim": "#99cbff",
+                        "secondary-container": "#81f2eb",
+                        "primary-fixed": "#d6e3ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "max-width": "1440px",
+                        "margin-desktop": "48px",
+                        "margin-mobile": "16px",
+                        "unit": "4px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "h1-mobile": ["Manrope"],
+                        "h2": ["Manrope"],
+                        "body-ui": ["Inter"],
+                        "body-reading": ["\"Source Serif 4\""],
+                        "mono-technical": ["Geist"],
+                        "h1": ["Manrope"],
+                        "label-caps": ["Inter"]
+                    },
+                    "fontSize": {
+                        "h1-mobile": ["32px", {"lineHeight": "1.2", "fontWeight": "700"}],
+                        "h2": ["24px", {"lineHeight": "1.3", "fontWeight": "600"}],
+                        "body-ui": ["16px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "body-reading": ["18px", {"lineHeight": "1.7", "fontWeight": "400"}],
+                        "mono-technical": ["13px", {"lineHeight": "1.4", "fontWeight": "500"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "label-caps": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .agent-glow {
+            box-shadow: 0 0 15px rgba(56, 178, 172, 0.2);
+            animation: breathe 3s ease-in-out infinite;
+        }
+        @keyframes breathe {
+            0%, 100% { box-shadow: 0 0 5px rgba(56, 178, 172, 0.1); }
+            50% { box-shadow: 0 0 20px rgba(56, 178, 172, 0.3); }
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+        }
+        .shimmer-ai {
+            background: linear-gradient(90deg, #38B2AC, #4299E1, #38B2AC);
+            background-size: 200% 100%;
+            animation: shimmer 3s linear infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: 100% 0; }
+            100% { background-position: -100% 0; }
+        }
+        ::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface font-body-ui selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar Shell -->
+<nav class="fixed top-0 w-full z-50 bg-surface/70 backdrop-blur-md border-b border-outline-variant/30 shadow-sm h-16">
+<div class="flex justify-between items-center px-margin-mobile h-16 w-full max-w-max-width mx-auto">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-2xl" data-icon="hub">hub</span>
+<h1 class="font-h2 text-h2 font-bold text-primary">PaperPilot AI</h1>
+</div>
+<!-- Agent HUD Integration in Header -->
+<div class="flex items-center gap-4">
+<div class="hidden md:flex items-center bg-surface-container-low px-3 py-1.5 rounded-full border border-outline-variant/20 agent-glow">
+<div class="w-2 h-2 rounded-full bg-[#38B2AC] mr-2 animate-pulse"></div>
+<span class="font-mono-technical text-mono-technical text-on-surface-variant">Planner Agent: <span class="font-bold">Thinking...</span></span>
+</div>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-outline-variant">
+<img class="w-full h-full object-cover" data-alt="A professional high-resolution headshot of a scholar in a modern, brightly lit office environment. The individual is wearing a dark navy blazer over a crisp white shirt, exuding an air of expertise and intellectual authority. The background features blurred bookshelves and a soft-focus digital screen, maintaining a scholarly yet technologically advanced aesthetic consistent with a research lab environment." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAIZhwHkqz8sxb32wdslNf5390nJUE_3AUVn_3UyA_CcQOktiBjbbVvXNKgJtqsmzw2XAtBmN3nX6Leb9-ygm7vA_GzV4f-BwkdlZl0Tn0b4kFm4bsZkFQ2TylKlWMa-ESHHmEuXK1nQo5NIuweU2kN0M1c3hASwxl4hWzW6MYKs85Tb9_QsshxfafcsGIv0_X_t0SMsmb6YEXjLIyJNJowx_JgcXWbB2U7y0HBKqMMQKj0m-1lUkut">
+</div>
+</div>
+</div>
+</nav>
+<!-- Main Workspace -->
+<main class="pt-24 pb-32 px-margin-mobile md:px-margin-desktop max-w-max-width mx-auto grid grid-cols-1 lg:grid-cols-12 gap-gutter">
+<!-- Left Column: Search & Discovery Feed -->
+<div class="lg:col-span-8 space-y-12">
+<!-- Agent-Guided Search -->
+<section class="relative">
+<div class="glass-panel p-6 rounded-xl shadow-sm space-y-4">
+<div class="flex items-center gap-2 mb-2">
+<span class="material-symbols-outlined text-secondary" data-icon="auto_awesome">auto_awesome</span>
+<span class="font-label-caps text-label-caps text-secondary uppercase tracking-widest">Agent-Guided Synthesis</span>
+</div>
+<div class="relative group">
+<input class="w-full bg-surface-container-lowest border-outline-variant focus:border-primary focus:ring-1 focus:ring-primary h-14 pl-12 rounded-lg font-body-ui text-body-ui transition-all pr-6" placeholder="Explore complex topics, e.g., 'Evolution of Vision Transformers in Medical Imaging'" type="text">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline" data-icon="search">search</span>
+</div>
+<div class="flex flex-wrap gap-2 pt-2">
+<span class="text-xs font-mono-technical text-on-surface-variant">Suggested:</span>
+<button class="text-xs font-mono-technical text-primary hover:underline transition-all px-2">Cross-modal Attention</button>
+<span class="text-xs text-outline-variant">•</span>
+<button class="text-xs font-mono-technical text-primary hover:underline transition-all px-2">Few-shot prompting</button>
+<span class="text-xs text-outline-variant">•</span>
+<button class="text-xs font-mono-technical text-primary hover:underline transition-all px-2">RAG Latency</button>
+</div>
+</div>
+</section>
+<!-- Suggested Roadmaps (Horizontal Scroll) -->
+<section>
+<div class="flex justify-between items-end mb-4">
+<h2 class="font-h2 text-h2 text-primary">Suggested Roadmaps</h2>
+<a class="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors" href="#">VIEW ALL</a>
+</div>
+<div class="flex gap-4 overflow-x-auto pb-4 -mx-margin-mobile px-margin-mobile md:mx-0 md:px-0 md:px-4">
+<!-- Roadmap Card 1 -->
+<div class="min-w-[280px] md:min-w-[320px] bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-5 hover:shadow-md transition-shadow cursor-pointer group">
+<div class="flex justify-between items-start mb-4">
+<span class="bg-primary-container text-on-primary-container px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">AI FOUNDATIONS</span>
+<span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors" data-icon="map">map</span>
+</div>
+<h3 class="font-h2 text-lg text-on-surface mb-2">Vision Transformers</h3>
+<p class="text-on-surface-variant text-sm line-clamp-2 mb-4">From original ViT architectures to modern Swin and MAE breakthroughs.</p>
+<div class="flex items-center gap-2">
+<div class="flex -space-x-2">
+<div class="w-6 h-6 rounded-full bg-secondary-fixed border-2 border-surface"></div>
+<div class="w-6 h-6 rounded-full bg-tertiary-fixed border-2 border-surface"></div>
+</div>
+<span class="text-[10px] font-mono-technical text-outline">12 Papers • 3 Key Lessons</span>
+</div>
+</div>
+<!-- Roadmap Card 2 -->
+<div class="min-w-[280px] md:min-w-[320px] bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-5 hover:shadow-md transition-shadow cursor-pointer group">
+<div class="flex justify-between items-start mb-4">
+<span class="bg-secondary-container text-on-secondary-container px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">SYSTEMS DESIGN</span>
+<span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors" data-icon="schema">schema</span>
+</div>
+<h3 class="font-h2 text-lg text-on-surface mb-2">RAG Systems</h3>
+<p class="text-on-surface-variant text-sm line-clamp-2 mb-4">Optimizing Retrieval-Augmented Generation for enterprise scale and accuracy.</p>
+<div class="flex items-center gap-2">
+<div class="flex -space-x-2">
+<div class="w-6 h-6 rounded-full bg-primary-fixed border-2 border-surface"></div>
+<div class="w-6 h-6 rounded-full bg-secondary-fixed border-2 border-surface"></div>
+</div>
+<span class="text-[10px] font-mono-technical text-outline">8 Papers • 5 Agent Tasks</span>
+</div>
+</div>
+<!-- Roadmap Card 3 -->
+<div class="min-w-[280px] md:min-w-[320px] bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-5 hover:shadow-md transition-shadow cursor-pointer group">
+<div class="flex justify-between items-start mb-4">
+<span class="bg-tertiary-container text-on-tertiary-container px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">NLP</span>
+<span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors" data-icon="psychology">psychology</span>
+</div>
+<h3 class="font-h2 text-lg text-on-surface mb-2">Ethics in LLMs</h3>
+<p class="text-on-surface-variant text-sm line-clamp-2 mb-4">Analyzing bias mitigation and safety guardrails in large models.</p>
+<div class="flex items-center gap-2">
+<div class="flex -space-x-2">
+<div class="w-6 h-6 rounded-full bg-error-container border-2 border-surface"></div>
+</div>
+<span class="text-[10px] font-mono-technical text-outline">15 Papers • 4 Debates</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Recent Discoveries (Vertical List) -->
+<section class="space-y-4">
+<div class="flex justify-between items-end">
+<h2 class="font-h2 text-h2 text-primary">Recent Discoveries</h2>
+</div>
+<!-- Paper Card 1 -->
+<div class="group bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-6 hover:border-primary/40 transition-all cursor-pointer">
+<div class="flex justify-between items-start gap-4">
+<div class="space-y-1">
+<div class="flex items-center gap-2">
+<span class="bg-surface-container-high text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded uppercase">ARXIV</span>
+<span class="text-xs text-outline font-mono-technical">Published Nov 2023</span>
+</div>
+<h4 class="font-h2 text-xl text-on-surface group-hover:text-primary transition-colors leading-tight">Mamba: Linear-Time Sequence Modeling with Selective State Spaces</h4>
+<p class="text-on-surface-variant text-sm italic">Gu, A., &amp; Dao, T.</p>
+</div>
+<div class="flex flex-col items-end gap-2">
+<div class="bg-secondary/10 text-secondary border border-secondary/20 px-2 py-1 rounded-lg flex items-center gap-1 bg-tertiary-container/10">
+<span class="text-xs font-bold">98% Match</span>
+</div>
+</div>
+</div>
+<div class="mt-4 pt-4 border-t border-outline-variant/10 flex justify-between items-center">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined text-sm" data-icon="format_quote">format_quote</span>
+<span class="text-xs font-mono-technical">452 Citations</span>
+</div>
+<div class="flex items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined text-sm" data-icon="share">share</span>
+<span class="text-xs font-mono-technical">12 Shares</span>
+</div>
+</div>
+<button class="flex items-center gap-1 text-primary text-xs font-bold hover:gap-2 transition-all">
+                            READ SUMMARY <span class="material-symbols-outlined text-sm text-secondary" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Paper Card 2 -->
+<div class="group bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-6 hover:border-primary/40 transition-all cursor-pointer">
+<div class="flex justify-between items-start gap-4">
+<div class="space-y-1">
+<div class="flex items-center gap-2">
+<span class="bg-surface-container-high text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded uppercase">PEER REVIEWED</span>
+<span class="text-xs text-outline font-mono-technical">Published Oct 2023</span>
+</div>
+<h4 class="font-h2 text-xl text-on-surface group-hover:text-primary transition-colors leading-tight">Sparse Autoencoders find Highly Interpretable Features in Language Models</h4>
+<p class="text-on-surface-variant text-sm italic">Cunningham, H., et al.</p>
+</div>
+<div class="flex flex-col items-end gap-2">
+<div class="bg-secondary/10 text-secondary border border-secondary/20 px-2 py-1 rounded-lg flex items-center gap-1 bg-tertiary-container/10">
+<span class="text-xs font-bold">92% Match</span>
+</div>
+</div>
+</div>
+<div class="mt-4 pt-4 border-t border-outline-variant/10 flex justify-between items-center">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined text-sm" data-icon="format_quote">format_quote</span>
+<span class="text-xs font-mono-technical">89 Citations</span>
+</div>
+<div class="flex items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined text-sm" data-icon="share">share</span>
+<span class="text-xs font-mono-technical">4 Shares</span>
+</div>
+</div>
+<button class="flex items-center gap-1 text-primary text-xs font-bold hover:gap-2 transition-all">
+                            READ SUMMARY <span class="material-symbols-outlined text-sm text-secondary" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+</section>
+</div>
+<!-- Right Column: Agent HUD Sidebar -->
+<aside class="hidden lg:block lg:col-span-4 sticky top-24 h-fit">
+<div class="glass-panel rounded-xl overflow-hidden shadow-sm">
+<div class="p-4 border-b border-outline-variant/20 flex justify-between items-center">
+<h3 class="font-h2 text-sm font-bold text-primary uppercase tracking-tighter">Active Agent Fleet</h3>
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+</div>
+<div class="p-4 space-y-4">
+<!-- Agent HUD Module 1 -->
+<div class="p-3 bg-surface-container-low rounded-lg border border-outline-variant/10">
+<div class="flex justify-between items-start mb-2">
+<span class="text-xs font-bold text-on-surface">Planner Agent</span>
+<span class="text-[10px] font-mono-technical text-secondary uppercase">Busy</span>
+</div>
+<div class="text-[11px] text-on-surface-variant mb-3">Synthesizing recent transformer benchmarks for your dashboard.</div>
+<div class="w-full bg-outline-variant/20 h-1 rounded-full overflow-hidden">
+<div class="shimmer-ai h-full w-[65%]"></div>
+</div>
+</div>
+<!-- Agent HUD Module 2 -->
+<div class="p-3 bg-surface-container-low rounded-lg border border-outline-variant/10 opacity-70">
+<div class="flex justify-between items-start mb-2">
+<span class="text-xs font-bold text-on-surface">RAG Pipeline</span>
+<span class="text-[10px] font-mono-technical text-outline uppercase">Idle</span>
+</div>
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px] text-emerald-500" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span class="text-[10px] font-mono-technical text-on-surface-variant">Indexing Complete</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px] text-emerald-500" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span class="text-[10px] font-mono-technical text-on-surface-variant">Embedding Vectors</span>
+</div>
+</div>
+</div>
+</div>
+<div class="p-4 bg-primary-container text-on-primary-container">
+<button class="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-surface-container-lowest/10 hover:bg-surface-container-lowest/20 transition-all text-xs font-bold">
+<span class="material-symbols-outlined text-sm" data-icon="smart_toy">smart_toy</span>
+                        COMMAND CENTER
+                    </button>
+</div>
+</div>
+<!-- Reading Insights Card -->
+<div class="mt-6 p-6 rounded-xl bg-white border border-outline-variant/30">
+<h3 class="font-h2 text-lg text-primary mb-2">Weekly Insight</h3>
+<p class="text-sm text-on-surface-variant mb-4 leading-relaxed">Agent analysts have identified a 40% increase in <span class="font-bold text-secondary">State Space Model</span> submissions this month. Would you like to create a new research pillar?</p>
+<button class="w-full py-2 bg-primary text-on-primary rounded font-bold text-xs uppercase tracking-widest hover:shadow-lg transition-all active:scale-95">INITIATE PILLAR</button>
+</div>
+</aside>
+</main>
+<!-- Navigation Shell (BottomNavBar) -->
+<nav class="fixed bottom-0 left-0 w-full flex justify-around items-center h-20 pb-safe px-4 bg-surface dark:bg-surface-dim border-t border-outline-variant/20 z-50 md:hidden">
+<!-- Library -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1 hover:text-primary transition-all active:scale-90 duration-200">
+<span class="material-symbols-outlined" data-icon="library_books">library_books</span>
+<span class="font-label-caps text-label-caps mt-1">Library</span>
+</button>
+<!-- Discover (Active) -->
+<button class="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-full px-4 py-1 active:scale-90 transition-all duration-200">
+<span class="material-symbols-outlined" data-icon="explore" style="font-variation-settings: 'FILL' 1;">explore</span>
+<span class="font-label-caps text-label-caps mt-1">Discover</span>
+</button>
+<!-- Agents -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1 hover:text-primary transition-all active:scale-90 duration-200">
+<span class="material-symbols-outlined" data-icon="memory">memory</span>
+<span class="font-label-caps text-label-caps mt-1">Agents</span>
+</button>
+<!-- Chat -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1 hover:text-primary transition-all active:scale-90 duration-200">
+<span class="material-symbols-outlined" data-icon="forum">forum</span>
+<span class="font-label-caps text-label-caps mt-1">Chat</span>
+</button>
+</nav>
+<!-- Desktop Sidebar Rail (Optional per guidelines but good for context) -->
+<nav class="hidden md:flex fixed left-0 top-0 h-full w-[72px] flex-col items-center py-20 bg-surface border-r border-outline-variant/10 z-40">
+<div class="space-y-8">
+<button class="p-3 rounded-xl text-on-surface-variant hover:bg-surface-container transition-colors" title="Library">
+<span class="material-symbols-outlined" data-icon="library_books">library_books</span>
+</button>
+<button class="p-3 rounded-xl bg-primary-container text-on-primary-container shadow-sm" title="Discover">
+<span class="material-symbols-outlined" data-icon="explore" style="font-variation-settings: 'FILL' 1;">explore</span>
+</button>
+<button class="p-3 rounded-xl text-on-surface-variant hover:bg-surface-container transition-colors" title="Agents">
+<span class="material-symbols-outlined" data-icon="memory">memory</span>
+</button>
+<button class="p-3 rounded-xl text-on-surface-variant hover:bg-surface-container transition-colors" title="Chat">
+<span class="material-symbols-outlined" data-icon="forum">forum</span>
+</button>
+</div>
+</nav>
+<!-- Micro-interaction Script -->
+<script>
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                let ripple = document.createElement('div');
+                ripple.classList.add('ripple');
+                this.appendChild(ripple);
+                setTimeout(() => ripple.remove(), 600);
+            });
+        });
+    </script>
+
+
+</body></html>
+
+<!-- Discovery Feed -->
+<!DOCTYPE html><html class="light" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Paper Summary | PaperPilot AI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@600;700;800&amp;family=Source+Serif+4:opsz,wght@8..60,400;600&amp;family=Geist:wght@500&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed": "#84f5ee",
+                        "surface-container-highest": "#e0e3e5",
+                        "on-primary-fixed": "#001b3c",
+                        "on-tertiary-fixed-variant": "#004a78",
+                        "on-primary-container": "#86a0cd",
+                        "inverse-surface": "#2d3133",
+                        "on-error-container": "#93000a",
+                        "surface-container-high": "#e5e9eb",
+                        "tertiary-fixed": "#cfe5ff",
+                        "inverse-primary": "#adc7f7",
+                        "error": "#ba1a1a",
+                        "secondary-fixed-dim": "#66d8d2",
+                        "surface": "#f7fafc",
+                        "primary-fixed-dim": "#adc7f7",
+                        "on-background": "#181c1e",
+                        "tertiary-container": "#00385d",
+                        "surface-variant": "#e0e3e5",
+                        "outline-variant": "#c4c6cf",
+                        "on-surface": "#181c1e",
+                        "on-tertiary-fixed": "#001d34",
+                        "on-primary-fixed-variant": "#2d476f",
+                        "on-surface-variant": "#43474e",
+                        "surface-tint": "#455f88",
+                        "surface-container-low": "#f1f4f6",
+                        "error-container": "#ffdad6",
+                        "primary-container": "#1a365d",
+                        "inverse-on-surface": "#eef1f3",
+                        "surface-container-lowest": "#ffffff",
+                        "background": "#f7fafc",
+                        "on-error": "#ffffff",
+                        "surface-dim": "#d7dadc",
+                        "surface-bright": "#f7fafc",
+                        "surface-container": "#ebeef0",
+                        "on-secondary-fixed-variant": "#00504d",
+                        "secondary": "#006a66",
+                        "tertiary": "#00223b",
+                        "on-primary": "#ffffff",
+                        "on-secondary-container": "#006f6a",
+                        "primary": "#002045",
+                        "on-secondary": "#ffffff",
+                        "outline": "#74777f",
+                        "on-tertiary-container": "#4fa4ed",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary-fixed": "#00201e",
+                        "tertiary-fixed-dim": "#99cbff",
+                        "secondary-container": "#81f2eb",
+                        "primary-fixed": "#d6e3ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "max-width": "1440px",
+                        "margin-desktop": "48px",
+                        "margin-mobile": "16px",
+                        "unit": "4px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "h1-mobile": ["Manrope"],
+                        "h2": ["Manrope"],
+                        "body-ui": ["Inter"],
+                        "body-reading": ["\"Source Serif 4\""],
+                        "mono-technical": ["Geist"],
+                        "h1": ["Manrope"],
+                        "label-caps": ["Inter"]
+                    },
+                    "fontSize": {
+                        "h1-mobile": ["32px", {"lineHeight": "1.2", "fontWeight": "700"}],
+                        "h2": ["24px", {"lineHeight": "1.3", "fontWeight": "600"}],
+                        "body-ui": ["16px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "body-reading": ["18px", {"lineHeight": "1.7", "fontWeight": "400"}],
+                        "mono-technical": ["13px", {"lineHeight": "1.4", "fontWeight": "500"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "label-caps": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+        }
+        .ai-glow {
+            box-shadow: 0 0 15px rgba(56, 178, 172, 0.15);
+        }
+        .shimmer-bg {
+            background: linear-gradient(90deg, #38B2AC, #4299E1);
+            position: relative;
+            overflow: hidden;
+        }
+        .shimmer-bg::after {
+            content: "";
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            animation: shimmer 3s infinite;
+        }
+        @keyframes shimmer {
+            100% { left: 100%; }
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-body-ui min-h-screen">
+<!-- TopAppBar Navigation Shell -->
+<header class="fixed top-0 w-full z-50 bg-surface/70 dark:bg-surface-dim/70 backdrop-blur-md border-b border-outline-variant/30 dark:border-outline/20 shadow-sm">
+<div class="flex justify-between items-center px-margin-mobile h-16 w-full max-w-max-width mx-auto gap-4"><div class="flex items-center gap-4 flex-shrink min-w-0">
+<span class="material-symbols-outlined text-primary dark:text-primary-fixed flex-shrink-0" style="font-variation-settings: 'FILL' 1;">hub</span>
+<div class="min-w-0">
+<h1 class="font-h2 text-lg md:text-h2 font-bold text-primary dark:text-primary-fixed leading-tight truncate">Attention is All You Need</h1>
+<p class="text-[12px] text-on-surface-variant font-medium truncate">Vaswani et al. (2017)</p>
+</div>
+</div>
+<div class="hidden md:flex gap-6 items-center flex-shrink-0">
+<button class="text-on-surface-variant hover:bg-surface-container-high/50 px-4 py-2 rounded-full transition-colors font-label-caps text-label-caps">LIBRARY</button>
+<button class="text-on-surface-variant hover:bg-surface-container-high/50 px-4 py-2 rounded-full transition-colors font-label-caps text-label-caps">DISCOVER</button>
+<button class="text-primary font-bold px-4 py-2 rounded-full transition-colors font-label-caps text-label-caps">UNDERSTANDING</button>
+</div>
+<div class="flex items-center gap-3 flex-shrink-0">
+<button class="hidden sm:flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg font-medium text-sm transition-transform active:scale-95 whitespace-nowrap">
+<span class="material-symbols-outlined text-sm">download</span>
+<span class="">Download PDF</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center overflow-hidden border border-outline-variant">
+<img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBREEBj9D2S6pfNSMnI8fpO5wlH6D7MWemAQy-z-U2jKrgVKhWOW6ZRpoN7FFjjs0M5Oz9itk-kzTz9p8-O9DdJd1uaZZH1XMF4miLi3ZNWklTAWhg5LHFz0qyXzX-tlUfOyi-dQ2S8QXR0UBFrQown9RKUFIXXKg6-XEdC7CsbnOHTBr3lfdzUaO8K3zDzPIxjvXRv_0NpLRGUXfxfxIuQSaXd0F2B_VmLX-pjZmgIWTx5WlH-VaxA">
+</div>
+</div></div>
+</header>
+<main class="pb-32 px-margin-mobile md:px-margin-desktop max-w-max-width mx-auto grid grid-cols-1 lg:grid-cols-12 gap-gutter pt-28">
+<!-- Left Column: Summary Content -->
+<div class="lg:col-span-8 space-y-8">
+<!-- Tab Selector -->
+<div class="flex gap-2 p-1 bg-surface-container rounded-xl overflow-x-auto no-scrollbar"><button class="whitespace-nowrap px-5 py-2.5 rounded-lg text-primary font-bold shadow-sm transition-all text-sm bg-primary-container">Quick</button>
+<button class="whitespace-nowrap px-5 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high/50 transition-all text-sm">Beginner</button>
+<button class="whitespace-nowrap px-5 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high/50 transition-all text-sm font-mono-technical">Technical</button>
+<button class="whitespace-nowrap px-5 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high/50 transition-all text-sm">Contribution</button>
+<button class="whitespace-nowrap px-5 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high/50 transition-all text-sm">Limitations</button></div>
+<!-- Content Area -->
+<section class="space-y-6">
+<article class="font-body-reading text-body-reading text-on-surface leading-relaxed max-w-[800px]">
+<p class="mb-6">
+                        The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the <span class="bg-secondary-fixed/30 border-b border-secondary px-1 font-semibold">Transformer</span>, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.
+                    </p>
+<p class="mb-6">
+                        Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English-to-German translation task, improving over the existing best results, including ensembles, by over 2 BLEU.
+                    </p>
+<div class="my-8 p-6 glass-panel rounded-xl ai-glow relative">
+<div class="absolute top-0 right-0 -mt-2 -mr-2 bg-secondary text-white text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-widest shadow-lg shadow-[0_0_10px_rgba(56,178,172,0.5)]">Agent Insight</div>
+<h4 class="font-h2 text-lg font-bold text-primary mb-3 flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary" style="font-variation-settings: 'FILL' 1;">psychology</span>
+                            Synthesized Core Concept
+                        </h4>
+<p class="text-on-surface-variant italic">
+                            "The Transformer's central innovation is the 'Self-Attention' mechanism, which allows the model to weigh the importance of different words in a sequence regardless of their distance, overcoming the vanishing gradient bottleneck typical in LSTMs."
+                        </p>
+</div>
+<p class="">
+                        On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data.
+                    </p>
+</article>
+<!-- Key Contributions -->
+<div class="space-y-4">
+<h3 class="font-h2 text-h2 text-primary border-l-4 border-primary pl-4">Key Contributions</h3>
+<ul class="space-y-4">
+<li class="flex items-start gap-4 p-4 hover:bg-surface-container-low transition-colors rounded-lg border border-transparent hover:border-outline-variant/30">
+<div class="w-8 h-8 rounded bg-primary-container flex items-center justify-center text-on-primary-container flex-shrink-0">
+<span class="material-symbols-outlined text-lg">auto_awesome</span>
+</div>
+<div>
+<span class="font-bold text-primary block">Elimination of Recurrence</span>
+<span class="text-on-surface-variant text-sm">Demonstrates that sequence-to-sequence tasks can be completed without RNNs or CNNs, enabling massive parallelization.</span>
+</div>
+</li>
+<li class="flex items-start gap-4 p-4 hover:bg-surface-container-low transition-colors rounded-lg border border-transparent hover:border-outline-variant/30">
+<div class="w-8 h-8 rounded bg-primary-container flex items-center justify-center text-on-primary-container flex-shrink-0">
+<span class="material-symbols-outlined text-lg">mediation</span>
+</div>
+<div>
+<span class="font-bold text-primary block">Multi-Head Attention</span>
+<span class="text-on-surface-variant text-sm">Introduces a mechanism to jointly attend to information from different representation subspaces at different positions.</span>
+</div>
+</li>
+<li class="flex items-start gap-4 p-4 hover:bg-surface-container-low transition-colors rounded-lg border border-transparent hover:border-outline-variant/30">
+<div class="w-8 h-8 rounded bg-primary-container flex items-center justify-center text-on-primary-container flex-shrink-0">
+<span class="material-symbols-outlined text-lg">speed</span>
+</div>
+<div>
+<span class="font-bold text-primary block">Training Efficiency</span>
+<span class="text-on-surface-variant text-sm">Reduces training time from weeks to days while achieving higher accuracy on standard benchmarks.</span>
+</div>
+</li>
+</ul>
+</div>
+</section>
+</div>
+<!-- Right Column: HUD & Glossary -->
+<aside class="lg:col-span-4 space-y-gutter">
+<!-- Agent HUD Sidebar -->
+<div class="glass-panel p-6 rounded-xl space-y-4 sticky top-24 shadow-sm border border-outline-variant/30">
+<div class="flex items-center justify-between mb-2">
+<span class="font-label-caps text-label-caps text-on-surface-variant">AGENT HUD</span>
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+<span class="text-[10px] font-bold text-secondary tracking-widest">ANALYZING</span>
+</div>
+</div>
+<div class="space-y-4">
+<div class="flex flex-col gap-1">
+<div class="flex justify-between text-xs font-medium mb-1">
+<span class="">Deep Comprehension</span>
+<span class="text-primary">88%</span>
+</div>
+<div class="w-full h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-secondary w-[88%]"></div>
+</div>
+</div>
+<div class="p-3 bg-surface rounded-lg border border-outline-variant/20">
+<p class="text-[11px] font-mono-technical text-on-surface-variant uppercase mb-2">Current Operation</p>
+<p class="text-sm font-medium text-primary">Cross-referencing citations for architectural validation...</p>
+</div>
+<div class="space-y-2">
+<p class="text-[11px] font-mono-technical text-on-surface-variant uppercase">RAG Pipeline Status</p>
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-2 text-xs text-secondary font-semibold">
+<span class="material-symbols-outlined text-sm">check_circle</span> Indexing Complete
+                            </div>
+<div class="flex items-center gap-2 text-xs text-secondary font-semibold">
+<span class="material-symbols-outlined text-sm">check_circle</span> Embedding Optimized
+                            </div>
+<div class="flex items-center gap-2 text-xs text-secondary-container bg-tertiary-container px-2 py-1 rounded">
+<span class="material-symbols-outlined text-sm animate-spin">sync</span> Semantic Chunking...
+                            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- Glossary Section -->
+<div class="space-y-4">
+<h4 class="font-label-caps text-label-caps text-on-surface-variant">PAPER GLOSSARY</h4>
+<div class="grid grid-cols-1 gap-4">
+<div class="p-4 bg-white border border-outline-variant/40 rounded-lg hover:shadow-md transition-shadow">
+<p class="font-bold text-primary text-sm mb-1">BLEU Score</p>
+<p class="text-xs text-on-surface-variant">Bilingual Evaluation Understudy; a metric for evaluating the quality of text which has been machine-translated.</p>
+</div>
+<div class="p-4 bg-white border border-outline-variant/40 rounded-lg hover:shadow-md transition-shadow">
+<p class="font-bold text-primary text-sm mb-1">Positional Encoding</p>
+<p class="text-xs text-on-surface-variant">Information added to embeddings to inject information about the relative or absolute position of tokens.</p>
+</div>
+<div class="p-4 bg-white border border-outline-variant/40 rounded-lg hover:shadow-md transition-shadow">
+<p class="font-bold text-primary text-sm mb-1">Vanishing Gradient</p>
+<p class="text-xs text-on-surface-variant">A problem in training RNNs where gradients become extremely small, preventing weight updates in early layers.</p>
+</div>
+</div>
+</div>
+</aside>
+</main>
+<!-- Floating Action Button -->
+<button class="fixed bottom-24 right-6 md:right-12 z-50 text-white flex items-center gap-3 px-6 py-4 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all group bg-primary">
+<span class="material-symbols-outlined group-hover:rotate-12 transition-transform">forum</span>
+<span class="font-bold text-sm tracking-wide">Chat with Paper</span>
+</button>
+<!-- Bottom Navigation Shell -->
+<nav class="fixed bottom-0 left-0 w-full flex justify-around items-center h-20 pb-safe px-4 bg-surface dark:bg-surface-dim border-t border-outline-variant/20 dark:border-outline/10 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] z-50 md:hidden">
+<div class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1 active:scale-90 transition-all duration-200">
+<span class="material-symbols-outlined">library_books</span>
+<span class="font-label-caps text-label-caps mt-1">Library</span>
+</div>
+<div class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1 active:scale-90 transition-all duration-200">
+<span class="material-symbols-outlined">explore</span>
+<span class="font-label-caps text-label-caps mt-1">Discover</span>
+</div>
+<div class="flex flex-col items-center justify-center bg-primary-container dark:bg-tertiary-container text-on-primary-container dark:text-on-tertiary-container rounded-full px-4 py-1 active:scale-90 transition-all duration-200">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">memory</span>
+<span class="font-label-caps text-label-caps mt-1">Agents</span>
+</div>
+<div class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1 active:scale-90 transition-all duration-200">
+<span class="material-symbols-outlined">forum</span>
+<span class="font-label-caps text-label-caps mt-1">Chat</span>
+</div>
+</nav>
+<script>
+        // Simple micro-interaction for tab switching
+        const tabs = document.querySelectorAll('.bg-surface-container button');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => {
+                    t.classList.remove('bg-surface-container-lowest', 'text-primary', 'font-bold', 'shadow-sm');
+                    t.classList.add('text-on-surface-variant');
+                });
+                tab.classList.add('bg-surface-container-lowest', 'text-primary', 'font-bold', 'shadow-sm');
+                tab.classList.remove('text-on-surface-variant');
+            });
+        });
+    </script>
+
+
+</body></html>
+
+<!-- Paper Summary -->
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>PaperPilot AI - Research Library</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Source+Serif+4:opsz,wght@8..60,400&amp;family=Geist:wght@500&amp;display=swap" rel="stylesheet">
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "secondary-fixed": "#84f5ee",
+                    "surface-container-highest": "#e0e3e5",
+                    "on-primary-fixed": "#001b3c",
+                    "on-tertiary-fixed-variant": "#004a78",
+                    "on-primary-container": "#86a0cd",
+                    "inverse-surface": "#2d3133",
+                    "on-error-container": "#93000a",
+                    "surface-container-high": "#e5e9eb",
+                    "tertiary-fixed": "#cfe5ff",
+                    "inverse-primary": "#adc7f7",
+                    "error": "#ba1a1a",
+                    "secondary-fixed-dim": "#66d8d2",
+                    "surface": "#f7fafc",
+                    "primary-fixed-dim": "#adc7f7",
+                    "on-background": "#181c1e",
+                    "tertiary-container": "#00385d",
+                    "surface-variant": "#e0e3e5",
+                    "outline-variant": "#c4c6cf",
+                    "on-surface": "#181c1e",
+                    "on-tertiary-fixed": "#001d34",
+                    "on-primary-fixed-variant": "#2d476f",
+                    "on-surface-variant": "#43474e",
+                    "surface-tint": "#455f88",
+                    "surface-container-low": "#f1f4f6",
+                    "error-container": "#ffdad6",
+                    "primary-container": "#1a365d",
+                    "inverse-on-surface": "#eef1f3",
+                    "surface-container-lowest": "#ffffff",
+                    "background": "#f7fafc",
+                    "on-error": "#ffffff",
+                    "surface-dim": "#d7dadc",
+                    "surface-bright": "#f7fafc",
+                    "surface-container": "#ebeef0",
+                    "on-secondary-fixed-variant": "#00504d",
+                    "secondary": "#006a66",
+                    "tertiary": "#00223b",
+                    "on-primary": "#ffffff",
+                    "on-secondary-container": "#006f6a",
+                    "primary": "#002045",
+                    "on-secondary": "#ffffff",
+                    "outline": "#74777f",
+                    "on-tertiary-container": "#4fa4ed",
+                    "on-tertiary": "#ffffff",
+                    "on-secondary-fixed": "#00201e",
+                    "tertiary-fixed-dim": "#99cbff",
+                    "secondary-container": "#81f2eb",
+                    "primary-fixed": "#d6e3ff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "max-width": "1440px",
+                    "margin-desktop": "48px",
+                    "margin-mobile": "16px",
+                    "unit": "4px",
+                    "gutter": "24px"
+            },
+            "fontFamily": {
+                    "h1-mobile": ["Manrope"],
+                    "h2": ["Manrope"],
+                    "body-ui": ["Inter"],
+                    "body-reading": ["\"Source Serif 4\""],
+                    "mono-technical": ["Geist"],
+                    "h1": ["Manrope"],
+                    "label-caps": ["Inter"]
+            },
+            "fontSize": {
+                    "h1-mobile": ["32px", {"lineHeight": "1.2", "fontWeight": "700"}],
+                    "h2": ["24px", {"lineHeight": "1.3", "fontWeight": "600"}],
+                    "body-ui": ["16px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                    "body-reading": ["18px", {"lineHeight": "1.7", "fontWeight": "400"}],
+                    "mono-technical": ["13px", {"lineHeight": "1.4", "fontWeight": "500"}],
+                    "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    
+<truncated 34746 bytes>
+
+NOTE: The output was truncated because it was too long. Use a more targeted query or a smaller range to get the information you need.

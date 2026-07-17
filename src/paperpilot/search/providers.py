@@ -54,8 +54,12 @@ class ArxivProvider:
     """
 
     def __init__(self) -> None:
-        # Client handles socket timeouts and connection pooling internally
-        self._client = arxiv.Client()
+        # Configure client to avoid long hangs and fetch only what's needed
+        self._client = arxiv.Client(
+            page_size=10,       # default is 100, which is too much and can timeout
+            delay_seconds=1.0,  # default is 3.0 seconds
+            num_retries=0       # default is 3 retries which takes minutes to fail if down
+        )
         logger.info("ArxivProvider initialized.")
 
     def get_paper_by_id(self, arxiv_id: str) -> PaperMetadata | None:
