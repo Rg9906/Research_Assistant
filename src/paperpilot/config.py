@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     papers_dir: Path = Path("data/papers")
     index_dir: Path = Path("data/indexes")
+    db_path: Path = Path("data/workspace.db")
 
     # -- Chunking --
     chunk_size: int = 1000

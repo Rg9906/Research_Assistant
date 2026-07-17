@@ -23,6 +23,7 @@ Why Reducers?
 from __future__ import annotations
 
 from typing import Annotated, TypedDict
+from uuid import UUID
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -73,3 +74,11 @@ class AgentState(TypedDict):
     critic_approved: bool
     retry_count: int
     messages: Annotated[list[BaseMessage], add_messages]
+    plan_steps: list[str]
+    plan_nodes: list[str]
+    plan_queries: list[str]
+    current_step_idx: int
+    step_answers: list[str]
+    tutor_difficulty: str
+    workspace_id: UUID | None
+

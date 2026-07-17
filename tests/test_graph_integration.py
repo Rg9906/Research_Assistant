@@ -1,5 +1,4 @@
-"""
-Integration tests for the LangGraph multi-agent workflow.
+"""Integration tests for the LangGraph multi-agent workflow.
 
 Verifies that the compiled graph executes node functions, processes state transitions,
 applies routing loops (Tutor -> Critic), and maintains checkpointer history.
@@ -18,6 +17,8 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from tests.test_tutor import StubChatModel
 
 from paperpilot.agent.tutor import TutorAgent
+from paperpilot.agent.planner import PlannerAgent
+from paperpilot.agent.critic import CriticAgent
 from paperpilot.core.models import PaperMetadata, PaperSource, TextChunk
 from paperpilot.graph.builder import compile_agent_graph
 from paperpilot.graph.nodes import AgentNodes
@@ -30,36 +31,92 @@ from paperpilot.search.agent import SearchAgent
 # ---------------------------------------------------------------------------
 
 class GraphStubLLM(StubChatModel):
-    """Stub ChatModel that returns predefined routing and evaluation responses.
-
-    Will output 'TUTOR' or 'APPROVED' depending on the input messages.
-    """
+    """Stub ChatModel that returns predefined routing and evaluation JSON responses."""
 
     decision: str = "TUTOR"
 
     def _generate(self, messages: list[BaseMessage], stop=None, run_manager=None, **kwargs):
-        # Determine prompt context to simulate decisions
         prompt = messages[-1].content
-        
-        # Default response
-        content = self.decision
-        
+        content = ""
+
         # Simulate Planner Routing
         if "routing planner" in str(messages[0].content).lower():
             if "search" in prompt.lower() or "find" in prompt.lower():
                 if "vision" in prompt.lower():
-                    content = "SEARCH: Vision Transformers"
+                    content = """{
+                      "difficulty": "graduate/expert",
+                      "steps": [
+                        {
+                          "step_index": 0,
+                          "description": "Search for Vision Transformers",
+                          "node": "search",
+                          "query": "Vision Transformers"
+                        },
+                        {
+                          "step_index": 1,
+                          "description": "Explain Vision Transformers",
+                          "node": "tutor",
+                          "query": "Explain Vision Transformers"
+                        }
+                      ]
+                    }"""
                 else:
-                    content = "SEARCH: Attention mechanism"
+                    content = """{
+                      "difficulty": "graduate/expert",
+                      "steps": [
+                        {
+                          "step_index": 0,
+                          "description": "Search for Attention mechanism",
+                          "node": "search",
+                          "query": "Attention mechanism"
+                        },
+                        {
+                          "step_index": 1,
+                          "description": "Explain Attention mechanism",
+                          "node": "tutor",
+                          "query": "Explain Attention mechanism"
+                        }
+                      ]
+                    }"""
             else:
-                content = "TUTOR"
+                content = """{
+                  "difficulty": "graduate/expert",
+                  "steps": [
+                    {
+                      "step_index": 0,
+                      "description": "Explain concept",
+                      "node": "tutor",
+                      "query": "Explain concept"
+                    }
+                  ]
+                }"""
 
         # Simulate Critic Grounding Audit
         elif "critic" in str(messages[0].content).lower():
             if "hallucination" in prompt.lower():
-                content = "REJECTED: Unfounded claims present."
+                content = """{
+                  "grounding_passed": false,
+                  "grounding_feedback": "Hallucination detected",
+                  "relevance_passed": true,
+                  "relevance_feedback": "Relevant",
+                  "style_passed": true,
+                  "style_feedback": "Correct style",
+                  "approved": false,
+                  "feedback": "REJECTED: Hallucination detected"
+                }"""
             else:
-                content = "APPROVED"
+                content = """{
+                  "grounding_passed": true,
+                  "grounding_feedback": "Supported",
+                  "relevance_passed": true,
+                  "relevance_feedback": "Relevant",
+                  "style_passed": true,
+                  "style_feedback": "Correct style",
+                  "approved": true,
+                  "feedback": "APPROVED"
+                }"""
+        else:
+            content = self.decision
 
         message = AIMessage(content=content)
         generation = ChatGeneration(message=message)
@@ -92,7 +149,7 @@ class TestGraphIntegration:
 
     def test_direct_tutor_routing_flow(self):
         """If user query is about an existing paper, should bypass search and invoke tutor & critic."""
-        mock_llm = GraphStubLLM(decision="TUTOR")
+        mock_llm = GraphStubLLM()
         
         # Mock SearchAgent (should not be called)
         mock_search = MagicMock(spec=SearchAgent)
@@ -128,14 +185,18 @@ class TestGraphIntegration:
             "critic_feedback": "",
             "critic_approved": False,
             "retry_count": 0,
+            "plan_steps": [],
+            "plan_nodes": [],
+            "plan_queries": [],
+            "current_step_idx": 0,
+            "step_answers": [],
+            "tutor_difficulty": "graduate/expert",
         }
         
-        # We must provide a thread_id config for checkpointers to track execution
         config = {"configurable": {"thread_id": "test_thread_1"}}
         outputs = graph.invoke(inputs, config=config)
 
         # Verifications
-        assert outputs["search_query"] == ""
         assert len(outputs["discovered_papers"]) == 0
         assert len(outputs["retrieved_context"]) == 1
         assert outputs["generated_answer"] == "The paper proposes self-attention."
@@ -186,6 +247,12 @@ class TestGraphIntegration:
             "critic_feedback": "",
             "critic_approved": False,
             "retry_count": 0,
+            "plan_steps": [],
+            "plan_nodes": [],
+            "plan_queries": [],
+            "current_step_idx": 0,
+            "step_answers": [],
+            "tutor_difficulty": "graduate/expert",
         }
         
         config = {"configurable": {"thread_id": "test_thread_2"}}

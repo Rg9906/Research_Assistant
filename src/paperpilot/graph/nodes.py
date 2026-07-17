@@ -22,6 +22,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from paperpilot.agent.tutor import TutorAgent
+from paperpilot.agent.planner import PlannerAgent
+from paperpilot.agent.critic import CriticAgent
 from paperpilot.core.models import PaperMetadata
 from paperpilot.graph.state import AgentState
 from paperpilot.pipeline import DocumentPipeline
@@ -43,6 +45,8 @@ class AgentNodes:
         search_agent: SearchAgent,
         pipeline: DocumentPipeline,
         tutor_agent: TutorAgent,
+        planner_agent: PlannerAgent | None = None,
+        critic_agent: CriticAgent | None = None,
     ) -> None:
         """Initialize the agent nodes with their required services.
 
@@ -51,68 +55,48 @@ class AgentNodes:
             search_agent: Search agent for querying literature.
             pipeline: Document pipeline for indexing and retrieval.
             tutor_agent: Tutor agent for generating grounded responses.
+            planner_agent: Optional PlannerAgent. Created from chat_model if missing.
+            critic_agent: Optional CriticAgent. Created from chat_model if missing.
         """
         self.chat_model = chat_model
         self.search_agent = search_agent
         self.pipeline = pipeline
         self.tutor_agent = tutor_agent
+        self.planner_agent = planner_agent or PlannerAgent(chat_model)
+        self.critic_agent = critic_agent or CriticAgent(chat_model)
         logger.info("AgentNodes instantiated successfully.")
 
     def planner_node(self, state: AgentState) -> dict[str, Any]:
-        """Analyzes user query and decides whether search discovery is required.
-
-        Prompting style: Few-shot classification.
-        Outputs: updates `search_query` if searching, otherwise routes directly.
-        """
+        """Analyzes user query and formulates a multi-step execution plan."""
         query = state["query"]
         logger.info("Planner Node: Analyzing query '%s'", query)
 
-        system_prompt = (
-            "You are the routing planner for an AI research assistant.\n"
-            "Analyze the user's request and classify it into one of two options:\n"
-            "1. 'SEARCH': The user wants to search academic literature, find papers, "
-            "or discover research on a topic.\n"
-            "2. 'TUTOR': The user is asking a question about a paper they are currently reading, "
-            "or asking for an explanation of a concept.\n\n"
-            "Output format:\n"
-            "If you select SEARCH, respond with: SEARCH: <keywords to search for>\n"
-            "If you select TUTOR, respond with: TUTOR\n\n"
-            "Examples:\n"
-            "User: Find papers about Vision Transformers\n"
-            "Response: SEARCH: Vision Transformers\n"
-            "User: Explain Section 3 of this paper\n"
-            "Response: TUTOR\n"
-            "User: What did the authors mean by multi-head attention?\n"
-            "Response: TUTOR\n"
-            "User: Search for recent RAG breakthroughs\n"
-            "Response: SEARCH: RAG retrieval augment"
-        )
+        plan = self.planner_agent.generate_plan(query)
 
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=query),
-        ]
+        # Get first step node and query to decide initial search/tutor routing
+        first_step_node = plan.steps[0].node if plan.steps else "tutor"
+        first_step_query = plan.steps[0].query if plan.steps else query
 
-        response = self.chat_model.invoke(messages)
-        decision = str(response.content).strip()
+        search_query = first_step_query if first_step_node == "search" else ""
 
-        logger.info("Planner Node decision: '%s'", decision)
+        plan_steps = [step.description for step in plan.steps]
+        plan_nodes = [step.node for step in plan.steps]
+        plan_queries = [step.query for step in plan.steps]
 
-        if decision.upper().startswith("SEARCH"):
-            # Extract search keywords: "SEARCH: keywords" -> "keywords"
-            search_query = query
-            if ":" in decision:
-                search_query = decision.split(":", 1)[1].strip()
-            
-            return {
-                "search_query": search_query,
-                "messages": [AIMessage(content=f"Planner decided to search for: '{search_query}'")],
-            }
-        else:
-            return {
-                "search_query": "",
-                "messages": [AIMessage(content="Planner decided to route query to Tutor.")],
-            }
+        logger.info("Planner Node: generated plan difficulty = %s", plan.difficulty)
+        for i, step in enumerate(plan.steps):
+            logger.info("  Step %d [%s]: %s", i, step.node, step.description)
+
+        return {
+            "plan_steps": plan_steps,
+            "plan_nodes": plan_nodes,
+            "plan_queries": plan_queries,
+            "current_step_idx": 0,
+            "step_answers": [],
+            "tutor_difficulty": plan.difficulty,
+            "search_query": search_query,
+            "messages": [AIMessage(content=f"Planner generated plan with {len(plan_steps)} steps. Difficulty: {plan.difficulty}")],
+        }
 
     def search_node(self, state: AgentState) -> dict[str, Any]:
         """Invokes SearchAgent to query external APIs and retrieve papers."""
@@ -155,101 +139,107 @@ class AgentNodes:
         }
 
     def retriever_node(self, state: AgentState) -> dict[str, Any]:
-        """Indexes selected papers and retrieves context chunks.
-
-        Note: Download of random PDF URLs requires a PDF downloader. In this milestone,
-        we verify with our test paper `paper1.pdf` if it matches, otherwise we simulate
-        retrieval using our active vector store.
-        """
+        """Indexes selected papers and retrieves context chunks."""
         selected = state.get("selected_papers", [])
-        query = state["query"]
-        logger.info("Retriever Node: Fetching context for query '%s'", query)
 
-        # In this milestone's integration test, the pipeline is already populated
-        # via the manual test pipeline setup. We just query the active FAISS index.
-        retrieval_results = self.pipeline.retrieve(query, top_k=5)
+        current_idx = state.get("current_step_idx", 0)
+        plan_nodes = state.get("plan_nodes", [])
+        plan_queries = state.get("plan_queries", [])
+
+        # If we entered here from a 'search' node flow, the indexing is complete.
+        # Advance the step index to the next tutor step.
+        if current_idx < len(plan_nodes) and plan_nodes[current_idx] == "search":
+            current_idx += 1
+            logger.info("Retriever Node: completed search step. Advancing current_step_idx to %d", current_idx)
+
+        # Determine active query/subquestion
+        if current_idx < len(plan_queries):
+            active_query = plan_queries[current_idx]
+        else:
+            active_query = state["query"]
+
+        logger.info("Retriever Node: Fetching context for query '%s'", active_query)
+
+        # Query the active FAISS index
+        retrieval_results = self.pipeline.retrieve(active_query, top_k=5)
         chunks = [result.chunk for result in retrieval_results]
 
         logger.info("Retriever Node: Retrieved %d context chunks.", len(chunks))
 
         return {
             "retrieved_context": chunks,
-            "messages": [AIMessage(content=f"Retrieved {len(chunks)} chunks of context.")],
+            "current_step_idx": current_idx,
+            "messages": [AIMessage(content=f"Retrieved {len(chunks)} chunks of context for: '{active_query}'")],
         }
 
     def tutor_node(self, state: AgentState) -> dict[str, Any]:
         """Invokes TutorAgent to generate a grounded response using chunks."""
-        query = state["query"]
+        current_idx = state.get("current_step_idx", 0)
+        plan_queries = state.get("plan_queries", [])
+        difficulty = state.get("tutor_difficulty", "graduate/expert")
         chunks = state.get("retrieved_context", [])
         retry_count = state.get("retry_count", 0)
 
-        logger.info("Tutor Node: Generating answer (attempt %d)", retry_count + 1)
+        if current_idx < len(plan_queries):
+            active_query = plan_queries[current_idx]
+        else:
+            active_query = state["query"]
+
+        logger.info("Tutor Node: Generating answer for '%s' (difficulty=%s, attempt %d)", active_query, difficulty, retry_count + 1)
 
         # Call TutorAgent
-        answer = self.tutor_agent.answer_question(query, chunks)
+        answer = self.tutor_agent.answer_question(active_query, chunks, difficulty=difficulty)
 
         return {
             "generated_answer": answer,
             "retry_count": retry_count + 1,
-            # We append the generated answer as an assistant message in chat history
+            "critic_approved": False, # Reset grounding approval for this new answer draft
             "messages": [AIMessage(content=answer)],
         }
 
     def critic_node(self, state: AgentState) -> dict[str, Any]:
-        """Evaluates whether the generated answer is grounded in retrieved context.
-
-        Prompting style: Logical evaluation.
-        Outputs: updates `critic_approved` and `critic_feedback`.
-        """
-        query = state["query"]
+        """Evaluates whether the generated answer is grounded, relevant, and formatted correctly."""
+        current_idx = state.get("current_step_idx", 0)
+        plan_nodes = state.get("plan_nodes", [])
+        plan_queries = state.get("plan_queries", [])
+        difficulty = state.get("tutor_difficulty", "graduate/expert")
         context_chunks = state.get("retrieved_context", [])
         answer = state.get("generated_answer", "")
 
-        logger.info("Critic Node: Evaluating answer grounding...")
+        if current_idx < len(plan_queries):
+            active_query = plan_queries[current_idx]
+        else:
+            active_query = state["query"]
 
-        if not context_chunks:
-            logger.warning("Critic Node: No context available to evaluate.")
-            return {"critic_approved": True, "critic_feedback": "No context available."}
+        logger.info("Critic Node: Evaluating answer for step %d...", current_idx)
 
-        # Formulate evaluation context string
-        context_str = "\n\n".join(
-            f"Context Block {i}:\n{c.text}" for i, c in enumerate(context_chunks)
-        )
+        # Call CriticAgent
+        report = self.critic_agent.evaluate_answer(active_query, context_chunks, answer, difficulty)
 
-        system_prompt = (
-            "You are an AI research critic. Your job is to audit a generated answer "
-            "against the provided Source Context to detect hallucinations or ungrounded facts.\n\n"
-            "Constraints:\n"
-            "1. Check if the answer contains any claims, facts, or assumptions NOT supported "
-            "by the Source Context. Even minor additions are violations.\n"
-            "2. Ignore formatting/tone — evaluate only factual grounding.\n"
-            "3. If the answer states 'I cannot find the answer in the provided text' because "
-            "the information was missing, this is fully approved.\n\n"
-            "Output format:\n"
-            "If the answer is fully grounded, respond exactly with: APPROVED\n"
-            "If the answer contains hallucinations, respond with: REJECTED: <explanation of what is wrong>"
-        )
-
-        prompt = (
-            f"Source Context:\n{context_str}\n\n"
-            f"User Question: {query}\n\n"
-            f"Generated Answer: {answer}"
-        )
-
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=prompt),
-        ]
-
-        response = self.chat_model.invoke(messages)
-        feedback = str(response.content).strip()
-
-        logger.info("Critic Node Feedback: '%s'", feedback)
-
-        approved = feedback.upper().startswith("APPROVED")
-
-        return {
-            "critic_approved": approved,
-            "critic_feedback": feedback,
-            "messages": [AIMessage(content=f"Critic evaluated answer: {feedback[:100]}...")],
+        updates: dict[str, Any] = {
+            "critic_feedback": report.feedback,
         }
+
+        if report.approved:
+            step_answers = list(state.get("step_answers", []))
+            step_answers.append(answer)
+            updates["step_answers"] = step_answers
+            updates["current_step_idx"] = current_idx + 1
+
+            if current_idx + 1 < len(plan_nodes):
+                updates["retry_count"] = 0 # Reset retry count for next step
+                updates["critic_approved"] = True
+            else:
+                # Compile final answer from all step answers
+                if len(step_answers) > 1:
+                    final_answer = ""
+                    for idx, (desc, ans) in enumerate(zip(state.get("plan_steps", []), step_answers)):
+                        final_answer += f"### Step {idx+1}: {desc}\n{ans}\n\n"
+                    updates["generated_answer"] = final_answer.strip()
+                else:
+                    updates["generated_answer"] = answer
+                updates["critic_approved"] = True
+        else:
+            updates["critic_approved"] = False
+
+        return updates

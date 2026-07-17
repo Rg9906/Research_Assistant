@@ -32,28 +32,40 @@ def planner_router(state: AgentState) -> str:
     Returns:
         The name of the next node ("search" or "tutor").
     """
-    if state.get("search_query"):
-        return "search"
+    plan_nodes = state.get("plan_nodes", [])
+    current_idx = state.get("current_step_idx", 0)
+
+    if current_idx < len(plan_nodes):
+        node = plan_nodes[current_idx]
+        if node == "search":
+            return "search"
     return "tutor"
 
 
 def critic_router(state: AgentState) -> str:
-    """Evaluate Critic approval. Decide to retry or finalize execution.
+    """Evaluate Critic approval. Decide to retry, continue to next step, or finalize.
 
     Loops back to Tutor if the response was rejected, up to a limit of 3 tries.
+    If approved and there are more plan steps, routes to retriever for the next step.
 
     Args:
         state: Shared graph state.
 
     Returns:
-        The next node location ("tutor" or END).
+        The next node location ("tutor", "retriever", or END).
     """
     approved = state.get("critic_approved", False)
     retry_count = state.get("retry_count", 0)
+    current_idx = state.get("current_step_idx", 0)
+    plan_nodes = state.get("plan_nodes", [])
 
     if approved:
-        logger.info("Critic approved answer. Finalizing graph execution.")
-        return END
+        if current_idx < len(plan_nodes):
+            logger.info("Step approved. Routing to retriever for next step (%d/%d).", current_idx, len(plan_nodes))
+            return "retriever"
+        else:
+            logger.info("Critic approved final answer. Finalizing graph execution.")
+            return END
 
     if retry_count < 3:
         logger.info(
@@ -113,12 +125,13 @@ def create_agent_graph(nodes: AgentNodes) -> StateGraph:
     # Tutor output -> Critic audit
     workflow.add_edge("tutor", "critic")
 
-    # Critic routing: loop back to tutor or finish
+    # Critic routing: loop back to tutor, move to next step via retriever, or finish
     workflow.add_conditional_edges(
         "critic",
         critic_router,
         {
             "tutor": "tutor",
+            "retriever": "retriever",
             END: END,
         },
     )

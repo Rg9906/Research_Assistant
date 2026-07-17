@@ -36,8 +36,10 @@ logger = logging.getLogger(__name__)
 
 # Standard instruction block to enforce strict context-grounding
 SYSTEM_PROMPT_TEMPLATE = (
-    "You are a graduate-level AI research tutor. Your job is to answer questions "
+    "You are a research tutor. Your job is to answer questions "
     "about a research paper using ONLY the provided Source Context blocks.\n\n"
+    "Explanation Style Guideline:\n"
+    "{difficulty_instruction}\n\n"
     "Constraints:\n"
     "1. Rely ONLY on the clear facts mentioned in the context. Do not assume, extrapolate, "
     "or use outside knowledge.\n"
@@ -52,6 +54,12 @@ SYSTEM_PROMPT_TEMPLATE = (
     "{context}\n"
     "========================================="
 )
+
+DIFFICULTY_INSTRUCTIONS = {
+    "beginner": "Explain the concepts simply, using clear language and everyday analogies. Avoid dense jargon and explain any technical terms used.",
+    "undergraduate": "Explain the concepts at an undergraduate college level. Maintain technical accuracy but keep explanations accessible, structuring them clearly.",
+    "graduate/expert": "Explain at a graduate-student or researcher level. Be highly precise, detailed, and rigorous. Focus on mathematical or algorithmic nuances and keep the tone academic."
+}
 
 
 class TutorAgent:
@@ -85,6 +93,7 @@ class TutorAgent:
         self,
         question: str,
         chunks: list[TextChunk],
+        difficulty: str = "graduate/expert",
     ) -> str:
         """Answer a user question grounded in the provided chunks.
 
@@ -97,6 +106,7 @@ class TutorAgent:
         Args:
             question: The user's natural language question.
             chunks: List of retrieved TextChunks to use as grounding context.
+            difficulty: Explanation difficulty level ('beginner', 'undergraduate', 'graduate/expert').
 
         Returns:
             The model's textual answer.
@@ -111,33 +121,40 @@ class TutorAgent:
             page_info = f" (Page {chunk.start_page})" if chunk.start_page else ""
             block = f"Chunk {chunk.chunk_index}{page_info}:\n{chunk.text.strip()}"
             formatted_blocks.append(block)
-        
+
         context_str = "\n\n-----------------------------------------\n\n".join(formatted_blocks)
-        
+
         # Build prompt
-        system_text = SYSTEM_PROMPT_TEMPLATE.format(context=context_str)
+        difficulty_instruction = DIFFICULTY_INSTRUCTIONS.get(
+            difficulty.lower(), DIFFICULTY_INSTRUCTIONS["graduate/expert"]
+        )
+        system_text = SYSTEM_PROMPT_TEMPLATE.format(
+            difficulty_instruction=difficulty_instruction,
+            context=context_str,
+        )
         messages = [
             SystemMessage(content=system_text),
             HumanMessage(content=question),
         ]
 
         logger.debug("TutorAgent invoking ChatModel with %d context chunks", len(chunks))
-        
+
         try:
             # Invoke model (sync call)
             response = self.chat_model.invoke(messages)
             answer = response.content
-            
+
             # Type safety check: LangChain content can be str or list of dicts (multimodal)
             if not isinstance(answer, str):
                 answer = str(answer)
 
             # Post-process response: strip whitespace
             answer = answer.strip()
-            
+
             logger.info("TutorAgent generated answer (%d chars)", len(answer))
             return answer
 
         except Exception as e:
             logger.error("TutorAgent failed to generate response: %s", e)
             raise e
+

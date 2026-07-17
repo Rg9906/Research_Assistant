@@ -119,3 +119,21 @@ class TestTutorAgent:
         ])
 
         assert answer == "Clean Answer"
+
+    def test_answer_question_supports_difficulty(self):
+        """TutorAgent should format system prompt with the style instructions corresponding to the requested difficulty."""
+        model = StubChatModel(response_text="Analogies answer")
+        agent = TutorAgent(chat_model=model)
+
+        chunks = [TextChunk(paper_id=uuid4(), chunk_index=0, text="Transformer utilizes self-attention.", char_count=36)]
+        
+        # Test beginner difficulty
+        agent.answer_question("How do transformers work?", chunks, difficulty="beginner")
+        system_text = model.captured_messages[0].content
+        assert "everyday analogies" in system_text
+        
+        # Test expert difficulty
+        agent.answer_question("How do transformers work?", chunks, difficulty="graduate/expert")
+        system_text_expert = model.captured_messages[0].content
+        assert "mathematical or algorithmic nuances" in system_text_expert
+
