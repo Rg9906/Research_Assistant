@@ -1,27 +1,51 @@
+import logging
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Any
 from uuid import UUID
 
-from app.utils import get_db_manager, get_document_pipeline
+from app.utils import (
+    get_db_manager,
+    get_search_agent,
+    get_paper_session_manager,
+    get_workspace_chat_store,
+    WorkspaceChatStore,
+)
 from paperpilot.core.models import PaperMetadata
 from paperpilot.workspace.manager import WorkspaceManager
-from paperpilot.pipeline import DocumentPipeline
 from paperpilot.search.agent import SearchAgent
-from paperpilot.search.ranker import PaperRanker
-from app.utils import get_embedding_engine
+from paperpilot.services.paper_chat import PaperSessionManager
+from paperpilot.services.paper_chat.exceptions import PaperChatException
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="PaperPilot AI API")
 
-# Enable CORS for the Vite frontend
+# CORS: the frontend calls this API with plain `fetch` (no cookies/auth
+# headers), so we don't need `allow_credentials=True`. Combining a wildcard
+# origin with credentials is invalid per the CORS spec and browsers will
+# reject it anyway; keep the wildcard for local-dev convenience across
+# whatever port Vite picks, but leave credentials off.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify the Vite dev server URL
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _fail(status_code: int, log_message: str, error: Exception) -> HTTPException:
+    """Log full exception details server-side, return a sanitized client error.
+
+    Raw exception text (`str(e)`) can leak internal paths, stack details, or
+    provider error payloads to the client. Callers should log the message +
+    exception via `logger.exception` before raising this.
+    """
+    logger.exception(log_message)
+    return HTTPException(status_code=status_code, detail=log_message)
+
 
 # Models
 class WorkspaceCreate(BaseModel):
@@ -74,8 +98,13 @@ def create_workspace(workspace: WorkspaceCreate, db: WorkspaceManager = Depends(
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.delete("/api/workspaces/{workspace_id}")
-def delete_workspace(workspace_id: UUID, db: WorkspaceManager = Depends(get_db_manager)):
+def delete_workspace(
+    workspace_id: UUID,
+    db: WorkspaceManager = Depends(get_db_manager),
+    chat_store: WorkspaceChatStore = Depends(get_workspace_chat_store),
+):
     db.delete_workspace(workspace_id)
+    chat_store.set(workspace_id, [])
     return {"status": "success"}
 
 @app.get("/api/workspaces/{workspace_id}/papers", response_model=List[Any])
@@ -85,22 +114,13 @@ def list_workspace_papers(workspace_id: UUID, db: WorkspaceManager = Depends(get
     return [p.model_dump() for p in papers]
 
 @app.post("/api/search")
-def search_papers(query: SearchQuery, engine = Depends(get_embedding_engine)):
-    from paperpilot.search.providers import ArxivProvider, SemanticScholarProvider
-    ranker = PaperRanker(engine=engine)
-    providers = [ArxivProvider(), SemanticScholarProvider()]
-    agent = SearchAgent(providers=providers, ranker=ranker)
+def search_papers(query: SearchQuery, agent: SearchAgent = Depends(get_search_agent)):
     try:
         # discover_papers returns a list of tuples (PaperMetadata, score)
         results = agent.discover_papers(query.query, top_n=query.limit)
         return {"results": [p[0].model_dump() for p in results]}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-from app.utils import get_paper_session_manager
-from paperpilot.services.paper_chat import PaperSessionManager
+        raise _fail(500, f"Search failed for query '{query.query}'", e)
 
 @app.post("/api/workspaces/{workspace_id}/chat", response_model=ChatResponse)
 def chat_with_workspace(
@@ -108,20 +128,31 @@ def chat_with_workspace(
     message: ChatMessage,
     db: WorkspaceManager = Depends(get_db_manager),
     session_manager: PaperSessionManager = Depends(get_paper_session_manager),
+    chat_store: WorkspaceChatStore = Depends(get_workspace_chat_store),
 ):
     papers = db.get_workspace_papers(workspace_id)
     if not papers:
         raise HTTPException(status_code=400, detail="Workspace is empty. Add papers first.")
 
-    paper = papers[0]
+    titles = ", ".join(p.title for p in papers)
     try:
-        session = session_manager.get_or_create_session(metadata=paper, pdf_url=paper.pdf_url)
-        answer = session.chat(message.query)
+        # Fans the query out across every paper's index and merges results by
+        # score (see PaperSessionManager.chat_across_papers), so a workspace
+        # with several papers is grounded in all of them, not just the first.
+        # The underlying PaperSession/index is shared across every workspace
+        # that references a given paper, but conversation memory must not be
+        # — scope it by workspace_id so unrelated workspaces don't see each
+        # other's chat history.
+        history = chat_store.get(workspace_id)
+        answer, _sources, updated_history = session_manager.chat_across_papers(
+            papers, message.query, chat_history=history
+        )
+        chat_store.set(workspace_id, updated_history)
         return ChatResponse(answer=answer)
+    except PaperChatException as e:
+        raise _fail(502, f"Chat failed for workspace papers [{titles}]: {e}", e)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _fail(500, f"Unexpected error during chat for workspace papers [{titles}]", e)
 
 @app.post("/api/papers/process")
 def process_paper(
@@ -131,19 +162,6 @@ def process_paper(
 ):
     if not request.pdf_url:
         raise HTTPException(status_code=400, detail="Cannot process paper without a PDF URL")
-    
-    workspace_name = f"Paper: {request.title}"[:50]
-    
-    try:
-        workspace_id = db.create_workspace(workspace_name)
-    except ValueError:
-        workspaces = db.list_workspaces()
-        for w in workspaces:
-            if w["name"] == workspace_name:
-                workspace_id = w["workspace_id"]
-                break
-        else:
-            raise HTTPException(status_code=500, detail="Failed to create or find workspace")
 
     paper_meta = PaperMetadata(
         paper_id=request.paper_id,
@@ -156,16 +174,32 @@ def process_paper(
         pdf_url=request.pdf_url,
         venue=request.venue
     )
-    
-    db.add_paper_to_workspace(workspace_id, paper_meta, chunks=[])
-    
+
+    # Build/download the index BEFORE writing anything to the workspace DB.
+    # Previously the paper was persisted first and indexed second, so a
+    # download/parse/embedding failure left a permanently unchattable paper
+    # sitting in the workspace with no way to retry via the UI.
     try:
         session_manager.get_or_create_session(metadata=paper_meta, pdf_url=request.pdf_url)
+    except PaperChatException as e:
+        raise _fail(502, f"Failed to process PDF for '{request.title}': {e}", e)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to process PDF with LlamaIndex: {e}")
-        
+        raise _fail(500, f"Unexpected error indexing '{request.title}'", e)
+
+    workspace_name = f"Paper: {request.title}"[:50]
+    try:
+        workspace_id = db.create_workspace(workspace_name)
+    except ValueError:
+        workspaces = db.list_workspaces()
+        for w in workspaces:
+            if w["name"] == workspace_name:
+                workspace_id = w["workspace_id"]
+                break
+        else:
+            raise _fail(500, "Failed to create or find workspace", ValueError(workspace_name))
+
+    db.add_paper_to_workspace(workspace_id, paper_meta, chunks=[])
+
     return {"workspace_id": str(workspace_id)}
 
 if __name__ == "__main__":

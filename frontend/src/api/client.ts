@@ -45,6 +45,12 @@ export const searchPapers = async (query: string, limit: number = 5): Promise<Pa
   return data.results;
 };
 
+export const fetchWorkspacePapers = async (workspaceId: string): Promise<Paper[]> => {
+  const res = await fetch(`${API_BASE_URL}/workspaces/${workspaceId}/papers`);
+  if (!res.ok) throw new Error('Failed to fetch workspace papers');
+  return res.json();
+};
+
 export const chatWithWorkspace = async (workspaceId: string, query: string): Promise<string> => {
   const res = await fetch(`${API_BASE_URL}/workspaces/${workspaceId}/chat`, {
     method: 'POST',

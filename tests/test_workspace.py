@@ -150,3 +150,24 @@ def test_add_and_retrieve_paper(temp_db):
     assert retrieved_chunks[0].text == chunks[0].text
     assert retrieved_chunks[0].metadata == chunks[0].metadata
     assert retrieved_chunks[1].chunk_id == chunks[1].chunk_id
+
+
+def test_get_paper_by_id(temp_db):
+    """Should retrieve a paper by ID regardless of workspace membership, or None if missing."""
+    manager = WorkspaceManager(temp_db)
+    ws_id = manager.create_workspace("ML Papers")
+
+    paper = PaperMetadata(
+        title="Attention is All You Need",
+        authors=["Ashish Vaswani"],
+        publication_year=2017,
+        source=PaperSource.ARXIV,
+    )
+    manager.add_paper_to_workspace(ws_id, paper, chunks=[])
+
+    found = manager.get_paper_by_id(paper.paper_id)
+    assert found is not None
+    assert found.paper_id == paper.paper_id
+    assert found.title == paper.title
+
+    assert manager.get_paper_by_id(uuid4()) is None

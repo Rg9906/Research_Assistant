@@ -124,6 +124,48 @@ class TestSemanticScholarProvider:
         assert "computer science" in paper.keywords
 
     @patch("httpx.Client")
+    def test_search_extracts_category_from_dict_shaped_fields_of_study(self, mock_httpx_client_class):
+        """Real Semantic Scholar responses shape s2FieldsOfStudy as dicts, not strings.
+
+        Regression test: naively stringifying the dict (`str(f).lower()`)
+        used to pollute keywords with junk like
+        "{'category': 'computer science', 'source': 'external'}".
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "title": "BERT",
+                    "authors": [],
+                    "year": 2018,
+                    "citationCount": 1,
+                    "abstract": "",
+                    "externalIds": {},
+                    "openAccessPdf": None,
+                    "venue": "",
+                    "s2FieldsOfStudy": [
+                        {"category": "Computer Science", "source": "external"},
+                        {"category": "Linguistics", "source": "s2-fos-model"},
+                    ],
+                }
+            ]
+        }
+
+        mock_client = MagicMock()
+        mock_client.get.return_value = mock_response
+        mock_httpx_client_class.return_value.__enter__.return_value = mock_client
+
+        provider = SemanticScholarProvider()
+        results = provider.search("bert")
+
+        assert len(results) == 1
+        keywords = results[0].keywords
+        assert "computer science" in keywords
+        assert "linguistics" in keywords
+        assert not any("{" in kw for kw in keywords)
+
+    @patch("httpx.Client")
     def test_search_rate_limited(self, mock_httpx_client_class):
         """Should handle 429 rate limit codes and return empty list."""
         mock_response = MagicMock()

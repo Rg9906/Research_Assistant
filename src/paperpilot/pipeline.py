@@ -4,14 +4,14 @@ Refactored to delegate document intelligence, chunking, embedding, indexing,
 and grounded QA directly to LlamaIndex via PaperSessionManager.
 """
 
-from __future__ import annotations
-
 import logging
+import re
 from pathlib import Path
-from uuid import UUID
+from typing import Any, List
+from uuid import UUID, uuid4
 
 from paperpilot.config import get_settings
-from paperpilot.core.models import PaperMetadata
+from paperpilot.core.models import PaperMetadata, RetrievalResult, TextChunk, ChunkingStrategy
 from paperpilot.document.downloader import PDFDownloader
 from paperpilot.services.paper_chat import PaperSessionManager, PaperSession
 from paperpilot.workspace.manager import WorkspaceManager
@@ -77,6 +77,59 @@ class DocumentPipeline:
 
         return session
 
+    def retrieve(self, query: str, top_k: int | None = None) -> list[RetrievalResult]:
+        """Backward compatibility for retrieve() in LangGraph agent workflows.
+
+        Performs pure similarity retrieval against the LlamaIndex index (no LLM
+        synthesis call) and maps source nodes back to TextChunks.
+        """
+        if not self.workspace_id or not self.db_manager:
+            raise ValueError("WorkspaceManager and workspace_id required to retrieve context.")
+
+        papers = self.db_manager.get_workspace_papers(self.workspace_id)
+        if not papers:
+            return []
+
+        target_paper = papers[0]
+        session = self.get_session(metadata=target_paper, pdf_url=target_paper.pdf_url)
+
+        # Use a retriever (not a query engine) so this stays a pure similarity
+        # lookup — as_query_engine().query() would fire a full LLM synthesis
+        # call just to fetch chunks.
+        retriever = session.index.as_retriever(similarity_top_k=top_k or 5)
+        nodes_with_scores = retriever.retrieve(query)
+
+        results = []
+        for rank, node_with_score in enumerate(nodes_with_scores, start=1):
+            raw_meta = node_with_score.node.metadata or {}
+            page_num = raw_meta.get("page_label") or raw_meta.get("page_number") or 1
+            try:
+                page_num = int(page_num)
+            except (TypeError, ValueError):
+                page_num = 1
+
+            # TextChunk.metadata is typed dict[str, str]; LlamaIndex node metadata
+            # can contain ints/None (e.g. publication_year), so coerce every value.
+            meta = {str(k): str(v) for k, v in raw_meta.items() if v is not None}
+
+            chunk = TextChunk(
+                chunk_id=uuid4(),
+                paper_id=target_paper.paper_id,
+                chunk_index=rank,
+                text=node_with_score.node.get_content(),
+                char_count=len(node_with_score.node.get_content()),
+                start_page=page_num,
+                end_page=page_num,
+                strategy=ChunkingStrategy.RECURSIVE_CHARACTER,
+                metadata=meta,
+            )
+            results.append(RetrievalResult(
+                chunk=chunk,
+                score=float(node_with_score.score or 0.0),
+                rank=rank,
+            ))
+        return results
+
     def answer_question(self, query: str, paper_metadata: PaperMetadata | None = None) -> str:
         """Answer a user question grounded in paper context using LlamaIndex ChatEngine."""
         if not self.workspace_id or not self.db_manager:
@@ -98,31 +151,12 @@ class DocumentPipeline:
         papers = self.db_manager.get_workspace_papers(self.workspace_id) if self.workspace_id else []
         current_paper = next((p for p in papers if p.paper_id == paper_id), None)
         if not current_paper:
-            with self.db_manager._get_connection() as conn:
-                row = conn.execute("SELECT * FROM papers WHERE paper_id = ?;", (str(paper_id),)).fetchone()
-                if not row:
-                    raise ValueError(f"Paper with ID {paper_id} not found in database.")
-                import json
-                from datetime import datetime
-                from paperpilot.core.models import PaperSource
-                current_paper = PaperMetadata(
-                    paper_id=UUID(row["paper_id"]),
-                    title=row["title"],
-                    authors=json.loads(row["authors"]) if row["authors"] else [],
-                    publication_year=row["publication_year"],
-                    citation_count=row["citation_count"],
-                    abstract=row["abstract"],
-                    doi=row["doi"],
-                    pdf_url=row["pdf_url"],
-                    source=PaperSource(row["source"]),
-                    venue=row["venue"],
-                    keywords=json.loads(row["keywords"]) if row["keywords"] else [],
-                    discovered_at=datetime.fromisoformat(row["discovered_at"]),
-                )
+            current_paper = self.db_manager.get_paper_by_id(paper_id)
+            if not current_paper:
+                raise ValueError(f"Paper with ID {paper_id} not found in database.")
 
         logger.info("Syncing metadata for paper: '%s'", current_paper.title)
 
-        import re
         arxiv_id = None
         if current_paper.keywords:
             for kw in current_paper.keywords:

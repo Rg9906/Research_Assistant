@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
+
+from paperpilot.agent.formatting import clean_json_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class PlannerAgent:
         content = str(response.content).strip()
 
         # Clean markdown code blocks from output
-        cleaned_content = self._clean_json(content)
+        cleaned_content = clean_json_markdown(content)
 
         try:
             plan = ResearchPlan.model_validate_json(cleaned_content)
@@ -130,14 +130,3 @@ class PlannerAgent:
                 ],
             )
 
-    def _clean_json(self, text: str) -> str:
-        """Strip markdown json block markers if present."""
-        text = text.strip()
-        # Remove ```json ... ``` or ``` ... ```
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        return text.strip()

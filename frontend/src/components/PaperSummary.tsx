@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { processPaper, chatWithWorkspace } from '../api/client';
 import type { Paper } from '../api/client';
+import { useAgentActivity } from '../context/AgentActivityContext';
 
 const LOADING_MESSAGES = [
   "Brewing coffee for the AI...",
@@ -13,22 +14,41 @@ const LOADING_MESSAGES = [
   "Almost there..."
 ];
 
+interface SummaryTab {
+  id: string;
+  label: string;
+  prompt: string;
+}
+
+const SUMMARY_TABS: SummaryTab[] = [
+  { id: 'quick', label: 'Quick', prompt: 'Summarize this paper in five clear sentences.' },
+  { id: 'beginner', label: 'Beginner', prompt: "Explain this paper as if I'm an undergraduate student, avoiding heavy jargon and defining any technical terms you use." },
+  { id: 'technical', label: 'Technical', prompt: 'Give a graduate/researcher-level technical explanation of this paper, focusing on the methodology.' },
+  { id: 'contribution', label: 'Contribution', prompt: "List this paper's key contributions as concise bullet points." },
+  { id: 'limitations', label: 'Limitations', prompt: 'What are the limitations and weaknesses of this paper?' },
+];
+
 const PaperSummary: React.FC = () => {
   const { state } = useLocation();
   const navigate = useNavigate();
-  const { paperId } = useParams();
   const paper = state?.paper as Paper | undefined;
+  const { withActivity } = useAgentActivity();
 
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processError, setProcessError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: 'user' | 'agent'; content: string }[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [loadingMsgIndex, setLoadingMsgIndex] = useState(0);
 
+  const [activeTab, setActiveTab] = useState('quick');
+  const [tabContent, setTabContent] = useState<Record<string, string>>({});
+  const [tabLoading, setTabLoading] = useState(false);
+
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     if (isProcessing) {
       setLoadingMsgIndex(0);
       interval = setInterval(() => {
@@ -51,14 +71,15 @@ const PaperSummary: React.FC = () => {
 
   const handleProcessPaper = async () => {
     setIsProcessing(true);
+    setProcessError(null);
     try {
-      const wId = await processPaper(paper);
+      const wId = await withActivity('Reading and indexing paper...', () => processPaper(paper));
       setWorkspaceId(wId);
       setChatOpen(true);
       setMessages([{ role: 'agent', content: `Hello! I've read "${paper.title}". What would you like to know about it?` }]);
     } catch (err) {
       console.error(err);
-      alert('Failed to process paper for chat.');
+      setProcessError('Failed to process this paper for chat. Please try again.');
     } finally {
       setIsProcessing(false);
     }
@@ -74,7 +95,7 @@ const PaperSummary: React.FC = () => {
     setIsTyping(true);
 
     try {
-      const answer = await chatWithWorkspace(workspaceId, userMessage);
+      const answer = await withActivity('Answering from paper...', () => chatWithWorkspace(workspaceId, userMessage));
       setMessages(prev => [...prev, { role: 'agent', content: answer }]);
     } catch (err) {
       console.error(err);
@@ -84,12 +105,35 @@ const PaperSummary: React.FC = () => {
     }
   };
 
+  const handleTabClick = async (tabId: string) => {
+    setActiveTab(tabId);
+    if (tabId === 'quick' || tabContent[tabId] || !workspaceId) return;
+
+    const tab = SUMMARY_TABS.find(t => t.id === tabId);
+    if (!tab) return;
+
+    setTabLoading(true);
+    try {
+      const answer = await withActivity(`Generating ${tab.label.toLowerCase()} view...`, () =>
+        chatWithWorkspace(workspaceId, tab.prompt)
+      );
+      setTabContent(prev => ({ ...prev, [tabId]: answer }));
+    } catch (err) {
+      console.error(err);
+      setTabContent(prev => ({ ...prev, [tabId]: 'Sorry, could not generate this view. Please try again.' }));
+    } finally {
+      setTabLoading(false);
+    }
+  };
+
+  const activeTabMeta = SUMMARY_TABS.find(t => t.id === activeTab);
+
   return (
     <div className="min-h-screen bg-background text-on-background font-body-ui">
       <main className="px-margin-mobile md:px-margin-desktop max-w-max-width mx-auto grid grid-cols-1 lg:grid-cols-12 gap-gutter">
         {/* Left Column: Summary Content */}
         <div className="lg:col-span-8 space-y-8">
-          
+
           {/* Paper Header Information */}
           <div className="space-y-4 pb-6 border-b border-outline-variant/30">
             <h1 className="font-h2 text-2xl md:text-3xl font-bold text-primary leading-tight">{paper.title}</h1>
@@ -104,19 +148,47 @@ const PaperSummary: React.FC = () => {
             )}
           </div>
 
+          {processError && (
+            <div className="bg-error-container text-on-error-container rounded-lg p-4 text-sm flex items-center gap-2">
+              <span className="material-symbols-outlined text-sm">error</span>
+              {processError}
+            </div>
+          )}
+
           {/* Tab Selector */}
           <div className="flex gap-2 p-1 bg-surface-container rounded-xl overflow-x-auto scrollbar-hide">
-            <button className="whitespace-nowrap px-5 py-2.5 rounded-lg text-primary font-bold shadow-sm transition-all text-sm bg-primary-container">Quick</button>
-            <button className="whitespace-nowrap px-5 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high/50 transition-all text-sm">Beginner</button>
-            <button className="whitespace-nowrap px-5 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high/50 transition-all text-sm font-mono-technical">Technical</button>
-            <button className="whitespace-nowrap px-5 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high/50 transition-all text-sm">Contribution</button>
-            <button className="whitespace-nowrap px-5 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high/50 transition-all text-sm">Limitations</button>
+            {SUMMARY_TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => handleTabClick(tab.id)}
+                className={`whitespace-nowrap px-5 py-2.5 rounded-lg font-bold shadow-sm transition-all text-sm ${
+                  activeTab === tab.id
+                    ? 'text-primary bg-primary-container'
+                    : 'text-on-surface-variant hover:bg-surface-container-high/50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-          
+
           {/* Content Area */}
           <section className="space-y-6">
             <article className="font-body-reading text-body-reading text-on-surface leading-relaxed max-w-[800px]">
-              <p className="mb-6 whitespace-pre-wrap">{paper.abstract}</p>
+              {activeTab === 'quick' ? (
+                <p className="mb-6 whitespace-pre-wrap">{paper.abstract}</p>
+              ) : !workspaceId ? (
+                <p className="text-on-surface-variant italic">
+                  Click "Chat with Paper" below to unlock the AI-generated {activeTabMeta?.label.toLowerCase()} view.
+                </p>
+              ) : tabLoading && !tabContent[activeTab] ? (
+                <p className="text-on-surface-variant italic flex items-center gap-2">
+                  <span className="material-symbols-outlined animate-spin text-sm">sync</span>
+                  Generating {activeTabMeta?.label.toLowerCase()} view...
+                </p>
+              ) : (
+                <p className="mb-6 whitespace-pre-wrap">{tabContent[activeTab]}</p>
+              )}
             </article>
           </section>
         </div>
@@ -131,13 +203,13 @@ const PaperSummary: React.FC = () => {
                 <span className="text-[10px] font-bold text-secondary tracking-widest">{isProcessing ? 'ANALYZING' : (workspaceId ? 'READY' : 'IDLE')}</span>
               </div>
             </div>
-            
+
             <div className="space-y-4">
               {isProcessing ? (
                 <div className="p-3 bg-surface rounded-lg border border-outline-variant/20">
                   <p className="text-[11px] font-mono-technical text-on-surface-variant uppercase mb-2">Current Operation</p>
                   <p className="text-sm font-medium text-primary flex items-center gap-2">
-                    <span className="material-symbols-outlined animate-spin text-sm">sync</span> 
+                    <span className="material-symbols-outlined animate-spin text-sm">sync</span>
                     <span className="animate-pulse">{LOADING_MESSAGES[loadingMsgIndex]}</span>
                   </p>
                 </div>
@@ -179,7 +251,7 @@ const PaperSummary: React.FC = () => {
 
       {/* Floating Action Button */}
       {!chatOpen && !isProcessing && (
-        <button 
+        <button
           onClick={workspaceId ? () => setChatOpen(true) : handleProcessPaper}
           className="fixed bottom-24 right-6 md:right-12 z-50 text-white flex items-center gap-3 px-6 py-4 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all group bg-primary"
         >
@@ -205,7 +277,7 @@ const PaperSummary: React.FC = () => {
               <span className="material-symbols-outlined">close</span>
             </button>
           </div>
-          
+
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.map((msg, idx) => (
@@ -225,20 +297,20 @@ const PaperSummary: React.FC = () => {
               </div>
             )}
           </div>
-          
+
           {/* Input */}
           <form onSubmit={handleSendMessage} className="p-3 bg-surface-container-lowest border-t border-outline-variant/20 shrink-0">
             <div className="relative flex items-center">
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
-                placeholder="Ask about this paper..." 
+                placeholder="Ask about this paper..."
                 className="w-full bg-surface-container h-10 pl-4 pr-10 rounded-full text-sm border-none focus:ring-1 focus:ring-primary"
                 disabled={isTyping}
               />
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={!inputValue.trim() || isTyping}
                 className="absolute right-1 w-8 h-8 flex items-center justify-center text-primary disabled:opacity-50"
               >

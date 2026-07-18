@@ -81,6 +81,18 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.0
     openai_api_key: str = ""
 
+    # -- LlamaIndex & RAG Document Intelligence Settings --
+    rag_chunk_size: int = 512
+    rag_chunk_overlap: int = 50
+    rag_top_k: int = 3
+    rag_similarity_threshold: float = 0.7
+    rag_embedding_model: str = "BAAI/bge-small-en-v1.5"
+    rag_llm_model: str = "gpt-4o-mini"
+    rag_rerank_enabled: bool = False
+    rag_rerank_model: str = "BAAI/bge-reranker-base"
+    rag_rerank_top_n: int = 3
+    storage_papers_dir: Path = Path("storage/papers")
+
     # -- Academic Search (Milestone 4+) --
     semantic_scholar_api_key: str = ""
     search_weight_similarity: float = 0.5

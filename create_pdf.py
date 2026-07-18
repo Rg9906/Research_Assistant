@@ -1,5 +1,10 @@
+"""Manual dev script: generates a synthetic test PDF at data/papers/paper1.pdf.
+
+Not part of the pytest suite — used for ad-hoc smoke-testing the paper_chat
+session/indexing pipeline against a real (if synthetic) PDF on disk.
+"""
+
 import fitz
-import sys
 
 text_content = """Testora: Using Natural Language Intent to
 Detect Behavioral Regressions

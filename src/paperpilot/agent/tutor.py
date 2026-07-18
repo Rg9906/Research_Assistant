@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
+from paperpilot.agent.formatting import format_chunks_as_context
 from paperpilot.core.models import TextChunk
 
 logger = logging.getLogger(__name__)
@@ -116,13 +117,7 @@ class TutorAgent:
             return self.refusal_response
 
         # Format context: label each chunk with index and source page if available
-        formatted_blocks = []
-        for chunk in chunks:
-            page_info = f" (Page {chunk.start_page})" if chunk.start_page else ""
-            block = f"Chunk {chunk.chunk_index}{page_info}:\n{chunk.text.strip()}"
-            formatted_blocks.append(block)
-
-        context_str = "\n\n-----------------------------------------\n\n".join(formatted_blocks)
+        context_str = format_chunks_as_context(chunks)
 
         # Build prompt
         difficulty_instruction = DIFFICULTY_INSTRUCTIONS.get(

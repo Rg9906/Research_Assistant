@@ -2,48 +2,41 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { searchPapers } from '../api/client';
 import type { Paper } from '../api/client';
+import { useAgentActivity } from '../context/AgentActivityContext';
 
 const DiscoveryFeed: React.FC = () => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Paper[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { withActivity } = useAgentActivity();
 
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!query.trim()) return;
-    
+  const runSearch = async (searchQuery: string) => {
     setLoading(true);
     setHasSearched(true);
+    setError(null);
     try {
-      const data = await searchPapers(query);
+      const data = await withActivity('Searching literature...', () => searchPapers(searchQuery));
       setResults(data);
     } catch (err) {
       console.error(err);
-      alert('Error searching papers.');
+      setError('Something went wrong while searching. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSearch = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!query.trim()) return;
+    runSearch(query);
+  };
+
   const handleSuggestedClick = (suggestedQuery: string) => {
     setQuery(suggestedQuery);
-    
-    setLoading(true);
-    setHasSearched(true);
-    // we cant reliably call handleSearch immediately because state update is async
-    searchPapers(suggestedQuery)
-      .then((data) => {
-          setResults(data);
-      })
-      .catch((err) => {
-          console.error(err);
-          alert('Error searching papers.');
-      })
-      .finally(() => {
-          setLoading(false);
-      });
+    runSearch(suggestedQuery);
   };
 
   const handleReadSummary = (paper: Paper, e: React.MouseEvent) => {
@@ -104,6 +97,12 @@ const DiscoveryFeed: React.FC = () => {
         <div className="flex justify-between items-end">
           <h2 className="font-h2 text-h2 text-primary">Recent Discoveries {loading && <span className="text-sm">(Searching...)</span>}</h2>
         </div>
+        {error && (
+          <div className="bg-error-container text-on-error-container rounded-lg p-4 text-sm flex items-center gap-2">
+            <span className="material-symbols-outlined text-sm">error</span>
+            {error}
+          </div>
+        )}
         {results.map((paper) => {
           return (
             <div key={paper.paper_id} className="group bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-6 hover:border-primary/40 transition-all cursor-pointer">

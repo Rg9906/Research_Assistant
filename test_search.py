@@ -1,3 +1,10 @@
+"""Manual live-network verification script for the Search Agent.
+
+Not part of the pytest suite (pyproject.toml scopes testpaths to `tests/`,
+which mocks all external calls). Run directly with `python test_search.py`
+to sanity-check real arXiv/Semantic Scholar responses and ranking end-to-end.
+"""
+
 import logging
 from paperpilot.config import get_settings
 from paperpilot.retrieval.embedder import EmbeddingEngine

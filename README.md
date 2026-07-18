@@ -1,115 +1,110 @@
 # 🚀 PaperPilot AI
 
-> **"What if we built a graduate research assistant that doesn't sleep, doesn't complain about reading 80-page preprints, and runs on pure Python instead of $6 espresso?"** 
+> An autonomous research assistant that discovers academic papers, ranks them, indexes them, and lets you chat with them — grounded in the actual paper text, not vibes.
 
-Welcome to **PaperPilot AI** — the autonomous multi-agent research partner designed to actually *understand* scientific literature, not just CTRL+F through it. 
+PaperPilot AI searches arXiv and Semantic Scholar, ranks results with a weighted scoring model (semantic similarity + citation impact + recency), downloads and indexes selected papers with LlamaIndex, and answers questions about them through a chat interface.
 
-We got tired of boring, generic "Chat with PDF" wrappers that hallucinate formulas and lose context at the page boundary. So, we did what any sane developer running on caffeine at 3:00 AM does: we built our own modular document extraction substrate, rolled our own mathematical ranker, and wired it all up into a stateful, self-correcting agent graph using **LangGraph**.
-
-No magic. No bloated pre-made QA chains. Just clean engineering.
+For the full architecture, current technical debt, and engineering conventions, see **[CLAUDE.md](./CLAUDE.md)** — it's the source of truth for how this repository actually works today, kept in sync with the code rather than aspirational.
 
 ---
 
-## 🧠 The Architecture (Why this is peak engineering)
+## Architecture at a glance
 
-PaperPilot is built as a stateful directed graph. It doesn't just run top-to-bottom; it plans, searches, reads, generates, critiques itself, and loops back if it detects a slip-up.
-
-```mermaid
-graph TD
-    START([START]) --> Planner[planner_node]
-    Planner --> Router1{planner_router}
-    Router1 -->|SEARCH| Search[search_node]
-    Router1 -->|TUTOR| Retriever[retriever_node]
-    Search --> Selection[selection_node]
-    Selection --> Retriever
-    Retriever --> Tutor[tutor_node]
-    Tutor --> Critic[critic_node]
-    Critic --> Router2{critic_router}
-    Router2 -->|approved = True| END([END])
-    Router2 -->|approved = False & retries < 3| Tutor
-    Router2 -->|approved = False & retries = 3| END
+```
+frontend/          React 19 + Vite + TypeScript + Tailwind — search UI, workspace library, paper chat
+src/app/           FastAPI backend (api.py, utils.py) — the HTTP layer the frontend talks to
+src/paperpilot/    Installable Python package — search, ranking, document download,
+                    LlamaIndex-backed paper chat, SQLite workspace persistence
 ```
 
-### 🛰️ The Discovery Layer (Search Agent)
-Why search Semantic Scholar and arXiv manually? Our search agent queries both, merges duplicates using a **word-level Jaccard similarity index** (meaning it matches `"Title: A"` and `"A: Title"` instantly), and sorts results using a custom **multi-factor ranker**:
-*   **Semantic Relevance**: Embedding cosine similarity against the search intent.
-*   **Citation Impact**: Normalised using a **logarithmic scale** so that a single paper with 100k citations doesn't completely wipe out fresh breakthroughs.
-*   **Recency**: An **exponential age decay function** ($e^{-\lambda \cdot t}$) that keeps the research cutting-edge.
+There is also a LangGraph multi-agent pipeline (`src/paperpilot/agent/`, `src/paperpilot/graph/`) implementing a Planner → Search → Tutor → Critic self-correction loop. It's fully built and tested but **not currently wired into the API** — see CLAUDE.md §4 for why and what's planned.
 
-### 📄 The Parsing Substrate (Milestone 1 & 2)
-We extract text page-by-page using PyMuPDF, clean up ligatures and hyphenation artifacts on line breaks, and split text using a **recursive character chunker** with configurable overlap. 
-These chunks are embedded locally using `all-MiniLM-L6-v2` and indexed in a local **FAISS vector store**. Because FAISS only speaks vectors and integers, we built a mapping layer to translate FAISS index positions back to our immutable domain UUIDs.
+### Search & Ranking
+Queries arXiv and Semantic Scholar in parallel, merges duplicate results (DOI → arXiv ID → Jaccard title similarity), and ranks the merged set with:
+- **Semantic similarity** — cosine similarity between the query and each paper's title+abstract embedding
+- **Citation impact** — log-normalized citation count
+- **Recency** — exponential age decay
 
-### 🔄 The Self-Correction Loop (Tutor-Critic Loop)
-Our **Tutor Agent** generates responses strictly grounded in the retrieved chunks. Once done, the **Critic Agent** audits the draft. If it finds *any* claim not explicitly backed by the context, it REJECTS the draft, logs the violation, and forces the Tutor to regenerate. If it fails 3 times, the graph exits cleanly to prevent infinite loops.
+### Document Intelligence (RAG)
+Selected papers are downloaded, parsed with PyMuPDF, chunked, embedded (`BAAI/bge-small-en-v1.5`), and indexed with LlamaIndex (`VectorStoreIndex`), persisted per-paper under `storage/papers/paper_<id>/` with a content-hash fingerprint so re-processing an unchanged PDF just loads the cached index. Chat is grounded via a `condense_plus_context` chat engine; multi-paper workspaces fan a query out across every paper's index and merge results by score.
 
 ---
 
-## ⚡ Quick Start (Get it running in 60 seconds)
+## Quick Start
 
-### 1. Clone & Set Up Virtual Env
+### 1. Clone & set up a virtual environment
 ```bash
-# Clone the repository
 git clone https://github.com/Rg9906/Research_Assistant.git
 cd Research_Assistant
 
-# Create and activate your virtual environment
 python -m venv .venv
-.venv\Scripts\activate  # Windows
+.venv\Scripts\activate     # Windows
 source .venv/bin/activate  # macOS/Linux
 ```
 
-### 2. Install Dependencies (Warning: PyTorch is heavy!)
+### 2. Install dependencies
 ```bash
 pip install -e ".[dev]"
 ```
-*Note: This will install PyTorch, Hugging Face Transformers, FAISS, and LangGraph. Grab a coffee, it takes a couple of minutes.*
+This installs PyTorch, sentence-transformers, FAISS, LlamaIndex, and LangGraph — it will take a few minutes.
 
-### 3. Setup Your Keys
-Copy the environment template and add your API credentials:
+### 3. Configure environment
 ```bash
-copy .env.example .env
+copy .env.example .env    # Windows
+cp .env.example .env      # macOS/Linux
 ```
-Inside `.env`:
-```env
-OPENAI_API_KEY=your-actual-api-key-here
-# Optional: SEMANTIC_SCHOLAR_API_KEY=your-key-here
-```
+At minimum, set `OPENAI_API_KEY` in `.env` to enable chat/summarization. `SEMANTIC_SCHOLAR_API_KEY` is optional (raises the free-tier rate limit).
 
-### 4. Run the Test Suite (100% Offline verification!)
-We mock all API calls in our unit tests so you can verify the entire graph logic, mathematics, and FAISS operations instantly without burning your OpenAI quota:
+### 4. Run the test suite
 ```bash
 pytest tests/ -v
 ```
-*Expected output: `103 passed, 1 skipped` (The integration test skips gracefully if no valid API key is present).*
+61 tests run fully offline (all external calls mocked/stubbed). A further 9 tests in `tests/test_embedder.py` download the `all-MiniLM-L6-v2` model from Hugging Face on first run and require network access — they're skipped automatically in network-restricted environments.
+
+### 5. Run the backend
+```bash
+cd src
+uvicorn app.api:app --reload --port 8000
+```
+`src/app` isn't an installed package (no `__init__.py`), so it must be run with `src/` as the working directory / on `sys.path`.
+
+### 6. Run the frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
 ---
 
-## 📂 Code Layout
+## Code Layout
 
 ```
 src/paperpilot/
-├── core/           # Data models (PaperMetadata, TextChunk, ProcessedDocument)
-├── document/       # Text extractor & recursive character chunker
-├── retrieval/      # Embedder (SentenceTransformers) & Vector Store (FAISS wrapper)
-├── agent/          # LLM Tutor Agent
-├── search/         # Academic Search Providers & Weighted Paper Ranker
-├── graph/          # LangGraph state definitions, nodes, and builder
-├── config.py       # Pydantic settings and defaults
-└── pipeline.py     # Simple facade connecting retrieval to generation
+├── core/                 # Pydantic data models: PaperMetadata, TextChunk, RetrievalResult, ...
+├── config.py             # Pydantic Settings — .env-backed configuration
+├── document/             # PDF downloader (validation, retries, scheme/size safety checks)
+├── retrieval/             # Sentence-transformers embedder (used by the ranker)
+├── search/               # arXiv + Semantic Scholar providers, dedup/merge, weighted ranker
+├── services/paper_chat/  # PaperSession / PaperSessionManager — the live LlamaIndex RAG stack
+├── workspace/            # SQLite-backed WorkspaceManager (workspaces, papers, mappings)
+├── pipeline.py           # Facade connecting workspace + paper_chat for the LangGraph path
+├── agent/                # Planner / Tutor / Critic LangChain agents (LangGraph path)
+└── graph/                # LangGraph StateGraph wiring the agents together
+
+src/app/                  # FastAPI backend consumed by the frontend
+frontend/                 # React + Vite + TypeScript UI
+tests/                    # pytest suite (offline-first, pythonpath=src)
 ```
 
 ---
 
-## 🗺️ What's Next? (The Roadmap)
+## Roadmap
 
-*   [x] **Milestone 6**: Expanding Planner, Tutor, and Critic agents for multi-step execution plans and hierarchical critique audits.
-*   [x] **Milestone 7**: Workspace Management (managing multiple papers in a single workspace database).
-*   [x] **Milestone 8**: Direct PDF Downloader and metadata sync.
-*   [x] **Milestone 9**: Interactive Frontend (Streamlit or React/Vite dashboard).
+See CLAUDE.md §11 for the actively-maintained roadmap. In short: stabilize the current RAG path, decide how the Planner/Tutor/Critic grounding loop reaches production traffic, then build out comparison/summarization/roadmap-generation features on a solid foundation.
 
 ---
 
-## 🛡️ License
+## License
 
-MIT. Built with ☕ and late-night compilation sessions. If this helped you write a paper or save time, drop a star!
+MIT.

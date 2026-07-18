@@ -26,6 +26,24 @@ from paperpilot.core.models import PaperMetadata, PaperSource
 logger = logging.getLogger(__name__)
 
 
+def _normalize_field_of_study(field: object) -> str | None:
+    """Extract a lowercase keyword string from one s2FieldsOfStudy entry.
+
+    Semantic Scholar's real API returns a list of dicts like
+    {"category": "Computer Science", "source": "external"}, not plain
+    strings. `str(field).lower()` on such a dict produces a junk keyword
+    like "{'category': 'computer science', 'source': 'external'}". This
+    pulls out just the category, while still accepting a plain string
+    (defensive — and matches older API responses/test fixtures).
+    """
+    if isinstance(field, dict):
+        category = field.get("category")
+        return str(category).lower() if category else None
+    if field:
+        return str(field).lower()
+    return None
+
+
 class SearchProvider(Protocol):
     """Protocol defining the interface for all academic search providers.
 
@@ -219,7 +237,7 @@ class SemanticScholarProvider:
                 keywords.append(arxiv_id)
             fields_of_study = item.get("s2FieldsOfStudy")
             if fields_of_study:
-                keywords.extend([str(f).lower() for f in fields_of_study])
+                keywords.extend(kw for kw in (_normalize_field_of_study(f) for f in fields_of_study) if kw)
 
             return PaperMetadata(
                 paper_id=uuid4(),
@@ -293,7 +311,7 @@ class SemanticScholarProvider:
                     keywords.append(arxiv_id)
                 fields_of_study = item.get("s2FieldsOfStudy")
                 if fields_of_study:
-                    keywords.extend([str(f).lower() for f in fields_of_study])
+                    keywords.extend(kw for kw in (_normalize_field_of_study(f) for f in fields_of_study) if kw)
 
                 paper = PaperMetadata(
                     title=item.get("title", ""),

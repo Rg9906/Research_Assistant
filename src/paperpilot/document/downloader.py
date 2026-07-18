@@ -6,11 +6,15 @@ import logging
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 from uuid import UUID
 
 import fitz
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_ALLOWED_SCHEMES = ("http", "https")
+DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB — generous for a research paper PDF
 
 
 def normalize_pdf_url(url: str) -> str:
@@ -28,11 +32,20 @@ def normalize_pdf_url(url: str) -> str:
     return url
 
 
+class UnsafeDownloadURLError(ValueError):
+    """Raised when a PDF URL uses a scheme that is not in the downloader's allowlist."""
+
+
 class PDFDownloader:
     """Handles downloading PDF files from external URLs, verifying validity, and retry logic."""
 
     def __init__(
-        self, papers_dir: Path | str, timeout: float = 15.0, max_retries: int = 3
+        self,
+        papers_dir: Path | str,
+        timeout: float = 15.0,
+        max_retries: int = 3,
+        allowed_schemes: tuple[str, ...] = DEFAULT_ALLOWED_SCHEMES,
+        max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES,
     ) -> None:
         """Initialize the downloader.
 
@@ -40,10 +53,22 @@ class PDFDownloader:
             papers_dir: Directory where PDFs will be stored.
             timeout: Socket timeout for downloads in seconds.
             max_retries: Maximum download retry attempts.
+            allowed_schemes: URL schemes this downloader is permitted to fetch.
+                Defaults to http/https only. `pdf_url` values ultimately come
+                from user-supplied API requests or third-party search results,
+                so allowing arbitrary schemes (e.g. `file://`) would let a
+                caller read local files off disk. Tests that need to exercise
+                local fixtures should pass an explicit allowlist including
+                "file".
+            max_download_bytes: Hard cap on response size, enforced both via
+                the Content-Length header (when present) and while streaming,
+                to avoid loading an unbounded response fully into memory.
         """
         self.papers_dir = Path(papers_dir)
         self.timeout = timeout
         self.max_retries = max_retries
+        self.allowed_schemes = allowed_schemes
+        self.max_download_bytes = max_download_bytes
         self.headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -65,6 +90,13 @@ class PDFDownloader:
             Path to the downloaded local PDF file.
         """
         normalized_url = normalize_pdf_url(pdf_url)
+
+        scheme = urlparse(normalized_url).scheme.lower()
+        if scheme not in self.allowed_schemes:
+            raise UnsafeDownloadURLError(
+                f"URL scheme '{scheme}' is not permitted (allowed: {self.allowed_schemes})."
+            )
+
         dest_path = self.papers_dir / f"{paper_id}.pdf"
         temp_path = self.papers_dir / f"tmp_{paper_id}.pdf"
 
@@ -89,9 +121,30 @@ class PDFDownloader:
             attempt += 1
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                    # Write to temporary file first
+                    content_length = response.headers.get("Content-Length")
+                    if content_length and int(content_length) > self.max_download_bytes:
+                        raise ValueError(
+                            f"Response Content-Length ({content_length} bytes) exceeds "
+                            f"max_download_bytes ({self.max_download_bytes})."
+                        )
+
+                    # Stream to a temporary file in chunks, enforcing a hard byte
+                    # cap even when Content-Length is absent or understated —
+                    # otherwise a single response.read() call would buffer an
+                    # unbounded body fully into memory.
+                    written = 0
+                    chunk_size = 1024 * 1024
                     with open(temp_path, "wb") as f:
-                        f.write(response.read())
+                        while True:
+                            chunk = response.read(chunk_size)
+                            if not chunk:
+                                break
+                            written += len(chunk)
+                            if written > self.max_download_bytes:
+                                raise ValueError(
+                                    f"Download exceeded max_download_bytes ({self.max_download_bytes})."
+                                )
+                            f.write(chunk)
 
                 # Validate PDF structure
                 self._validate_pdf(temp_path)

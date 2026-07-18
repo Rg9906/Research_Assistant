@@ -29,6 +29,7 @@ Thumbs.db
 
 # Project data (downloaded PDFs, generated indexes)
 data/
+storage/
 
 # Pytest
 .pytest_cache/

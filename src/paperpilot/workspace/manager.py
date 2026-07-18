@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import UUID, uuid4
 
 from paperpilot.core.models import ChunkingStrategy, PaperMetadata, PaperSource, TextChunk
@@ -27,12 +28,23 @@ class WorkspaceManager:
         logger.info("Initializing WorkspaceManager at %s", self.db_path)
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Establish database connection with Row factory and foreign keys enabled."""
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
+        """Yield a database connection with Row factory and foreign keys enabled.
+
+        A plain sqlite3.Connection used as `with conn:` only commits/rolls back
+        the transaction — it never closes the connection. Wrapping this as a
+        contextmanager ensures every `with self._get_connection() as conn:`
+        call site also closes the connection on exit, avoiding a connection
+        leak on every database call.
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON;")
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         """Create schema tables if they do not exist."""
@@ -234,6 +246,28 @@ class WorkspaceManager:
             conn.commit()
             logger.info("Added paper '%s' and %d chunks to workspace %s", paper.title, len(chunks), workspace_id)
 
+    @staticmethod
+    def _row_to_paper_metadata(row: sqlite3.Row) -> PaperMetadata:
+        """Map a `papers` table row to a PaperMetadata instance.
+
+        Shared by every method that reads from the `papers` table so the
+        row-to-model mapping has exactly one implementation.
+        """
+        return PaperMetadata(
+            paper_id=UUID(row["paper_id"]),
+            title=row["title"],
+            authors=json.loads(row["authors"]) if row["authors"] else [],
+            publication_year=row["publication_year"],
+            citation_count=row["citation_count"],
+            abstract=row["abstract"],
+            doi=row["doi"],
+            pdf_url=row["pdf_url"],
+            source=PaperSource(row["source"]),
+            venue=row["venue"],
+            keywords=json.loads(row["keywords"]) if row["keywords"] else [],
+            discovered_at=datetime.fromisoformat(row["discovered_at"]),
+        )
+
     def get_workspace_papers(self, workspace_id: UUID) -> list[PaperMetadata]:
         """Retrieve all papers belonging to a workspace.
 
@@ -253,26 +287,22 @@ class WorkspaceManager:
                 (str(workspace_id),),
             )
             rows = cursor.fetchall()
+            return [self._row_to_paper_metadata(row) for row in rows]
 
-            papers = []
-            for row in rows:
-                papers.append(
-                    PaperMetadata(
-                        paper_id=UUID(row["paper_id"]),
-                        title=row["title"],
-                        authors=json.loads(row["authors"]) if row["authors"] else [],
-                        publication_year=row["publication_year"],
-                        citation_count=row["citation_count"],
-                        abstract=row["abstract"],
-                        doi=row["doi"],
-                        pdf_url=row["pdf_url"],
-                        source=PaperSource(row["source"]),
-                        venue=row["venue"],
-                        keywords=json.loads(row["keywords"]) if row["keywords"] else [],
-                        discovered_at=datetime.fromisoformat(row["discovered_at"]),
-                    )
-                )
-            return papers
+    def get_paper_by_id(self, paper_id: UUID) -> PaperMetadata | None:
+        """Retrieve a single paper's metadata by ID, independent of workspace membership.
+
+        Args:
+            paper_id: The paper's UUID.
+
+        Returns:
+            The PaperMetadata, or None if no paper with that ID exists.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM papers WHERE paper_id = ?;", (str(paper_id),)
+            ).fetchone()
+            return self._row_to_paper_metadata(row) if row else None
 
     def get_chunks_for_workspace(self, workspace_id: UUID) -> list[TextChunk]:
         """Retrieve all chunks belonging to all papers in a workspace.

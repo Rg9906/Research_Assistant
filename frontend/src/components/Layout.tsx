@@ -1,8 +1,10 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
+import { useAgentActivity } from '../context/AgentActivityContext';
 
 const Layout: React.FC = () => {
   const location = useLocation();
+  const { isActive, label } = useAgentActivity();
 
   return (
     <>
@@ -13,9 +15,11 @@ const Layout: React.FC = () => {
             <h1 className="font-h2 text-h2 font-bold text-primary">PaperPilot AI</h1>
           </Link>
           <div className="flex items-center gap-4">
-            <div className="hidden md:flex items-center bg-surface-container-low px-3 py-1.5 rounded-full border border-outline-variant/20 agent-glow">
-              <div className="w-2 h-2 rounded-full bg-[#38B2AC] mr-2 animate-pulse"></div>
-              <span className="font-mono-technical text-mono-technical text-on-surface-variant">Planner Agent: <span className="font-bold">Thinking...</span></span>
+            <div className={`hidden md:flex items-center bg-surface-container-low px-3 py-1.5 rounded-full border border-outline-variant/20 ${isActive ? 'agent-glow' : ''}`}>
+              <div className={`w-2 h-2 rounded-full mr-2 ${isActive ? 'bg-[#38B2AC] animate-pulse' : 'bg-outline-variant'}`}></div>
+              <span className="font-mono-technical text-mono-technical text-on-surface-variant">
+                Agent: <span className="font-bold">{isActive ? label : 'Idle'}</span>
+              </span>
             </div>
             <div className="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center text-primary font-bold overflow-hidden border border-outline-variant">
               PA
