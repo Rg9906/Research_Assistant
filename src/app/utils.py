@@ -23,6 +23,12 @@ def get_db_manager() -> WorkspaceManager:
 def get_embedding_engine() -> EmbeddingEngine:
     return EmbeddingEngine()
 
+from paperpilot.services.paper_chat import PaperSessionManager
+
+@lru_cache(maxsize=1)
+def get_paper_session_manager() -> PaperSessionManager:
+    return PaperSessionManager()
+
 def get_tutor_agent() -> TutorAgent:
     settings = get_settings()
     api_key = os.environ.get("OPENAI_API_KEY") or settings.openai_api_key

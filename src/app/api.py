@@ -42,6 +42,17 @@ class ChatMessage(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
 
+class ProcessPaperRequest(BaseModel):
+    paper_id: UUID
+    title: str
+    authors: List[str]
+    publication_year: Optional[int] = None
+    citation_count: Optional[int] = None
+    abstract: Optional[str] = None
+    doi: Optional[str] = None
+    pdf_url: Optional[str] = None
+    venue: Optional[str] = None
+
 # Endpoints
 @app.get("/api/workspaces", response_model=List[WorkspaceResponse])
 def list_workspaces(db: WorkspaceManager = Depends(get_db_manager)):
@@ -88,26 +99,74 @@ def search_papers(query: SearchQuery, engine = Depends(get_embedding_engine)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+from app.utils import get_paper_session_manager
+from paperpilot.services.paper_chat import PaperSessionManager
+
 @app.post("/api/workspaces/{workspace_id}/chat", response_model=ChatResponse)
-def chat_with_workspace(workspace_id: UUID, message: ChatMessage):
-    # Retrieve pipeline initialized for this workspace
-    pipeline = get_document_pipeline(workspace_id)
-    
-    # Ensure there are papers to chat with
-    papers = pipeline.db_manager.get_workspace_papers(workspace_id)
+def chat_with_workspace(
+    workspace_id: UUID,
+    message: ChatMessage,
+    db: WorkspaceManager = Depends(get_db_manager),
+    session_manager: PaperSessionManager = Depends(get_paper_session_manager),
+):
+    papers = db.get_workspace_papers(workspace_id)
     if not papers:
         raise HTTPException(status_code=400, detail="Workspace is empty. Add papers first.")
 
+    paper = papers[0]
     try:
-        # We need to answer the question using the vector store
-        # The pipeline assumes papers have been loaded into the FAISS store
-        # For simplicity, if not loaded, we should ideally load them.
-        # But `pipeline.answer_question` expects chunks to be retrieved.
-        # This implementation requires chunks to be already in the FAISS store.
-        answer = pipeline.answer_question(message.query)
+        session = session_manager.get_or_create_session(metadata=paper, pdf_url=paper.pdf_url)
+        answer = session.chat(message.query)
         return ChatResponse(answer=answer)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/papers/process")
+def process_paper(
+    request: ProcessPaperRequest,
+    db: WorkspaceManager = Depends(get_db_manager),
+    session_manager: PaperSessionManager = Depends(get_paper_session_manager),
+):
+    if not request.pdf_url:
+        raise HTTPException(status_code=400, detail="Cannot process paper without a PDF URL")
+    
+    workspace_name = f"Paper: {request.title}"[:50]
+    
+    try:
+        workspace_id = db.create_workspace(workspace_name)
+    except ValueError:
+        workspaces = db.list_workspaces()
+        for w in workspaces:
+            if w["name"] == workspace_name:
+                workspace_id = w["workspace_id"]
+                break
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create or find workspace")
+
+    paper_meta = PaperMetadata(
+        paper_id=request.paper_id,
+        title=request.title,
+        authors=request.authors,
+        publication_year=request.publication_year,
+        citation_count=request.citation_count,
+        abstract=request.abstract,
+        doi=request.doi,
+        pdf_url=request.pdf_url,
+        venue=request.venue
+    )
+    
+    db.add_paper_to_workspace(workspace_id, paper_meta, chunks=[])
+    
+    try:
+        session_manager.get_or_create_session(metadata=paper_meta, pdf_url=request.pdf_url)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to process PDF with LlamaIndex: {e}")
+        
+    return {"workspace_id": str(workspace_id)}
 
 if __name__ == "__main__":
     import uvicorn

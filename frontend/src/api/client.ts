@@ -55,3 +55,17 @@ export const chatWithWorkspace = async (workspaceId: string, query: string): Pro
   const data = await res.json();
   return data.answer;
 };
+
+export const processPaper = async (paper: Paper): Promise<string> => {
+  const res = await fetch(`${API_BASE_URL}/papers/process`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(paper),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || 'Failed to process paper');
+  }
+  const data = await res.json();
+  return data.workspace_id;
+};

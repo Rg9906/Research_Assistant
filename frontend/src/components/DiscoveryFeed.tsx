@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { searchPapers } from '../api/client';
 import type { Paper } from '../api/client';
 
@@ -7,6 +8,7 @@ const DiscoveryFeed: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Paper[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
+  const navigate = useNavigate();
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -30,9 +32,11 @@ const DiscoveryFeed: React.FC = () => {
     
     setLoading(true);
     setHasSearched(true);
-    // we can't reliably call handleSearch immediately because state update is async
+    // we cant reliably call handleSearch immediately because state update is async
     searchPapers(suggestedQuery)
-      .then(setResults)
+      .then((data) => {
+          setResults(data);
+      })
       .catch((err) => {
           console.error(err);
           alert('Error searching papers.');
@@ -40,6 +44,11 @@ const DiscoveryFeed: React.FC = () => {
       .finally(() => {
           setLoading(false);
       });
+  };
+
+  const handleReadSummary = (paper: Paper, e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate(`/paper/${paper.paper_id}`, { state: { paper } });
   };
 
   return (
@@ -95,31 +104,39 @@ const DiscoveryFeed: React.FC = () => {
         <div className="flex justify-between items-end">
           <h2 className="font-h2 text-h2 text-primary">Recent Discoveries {loading && <span className="text-sm">(Searching...)</span>}</h2>
         </div>
-        {results.map((paper) => (
-          <div key={paper.paper_id} className="group bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-6 hover:border-primary/40 transition-all cursor-pointer">
-            <div className="flex justify-between items-start gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="bg-surface-container-high text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded uppercase">{paper.venue || 'ARXIV'}</span>
-                  <span className="text-xs text-outline font-mono-technical">Published {paper.publication_year}</span>
-                </div>
-                <h4 className="font-h2 text-xl text-on-surface group-hover:text-primary transition-colors leading-tight">{paper.title}</h4>
-                <p className="text-on-surface-variant text-sm italic">{paper.authors.join(', ')}</p>
-              </div>
-            </div>
-            <div className="mt-4 pt-4 border-t border-outline-variant/10 flex justify-between items-center">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1 text-on-surface-variant">
-                  <span className="material-symbols-outlined text-sm">format_quote</span>
-                  <span className="text-xs font-mono-technical">{paper.citation_count} Citations</span>
+        {results.map((paper) => {
+          return (
+            <div key={paper.paper_id} className="group bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-6 hover:border-primary/40 transition-all cursor-pointer">
+              <div className="flex justify-between items-start gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-surface-container-high text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded uppercase">{paper.venue || 'ARXIV'}</span>
+                    <span className="text-xs text-outline font-mono-technical">Published {paper.publication_year}</span>
+                  </div>
+                  <h4 className="font-h2 text-xl text-on-surface group-hover:text-primary transition-colors leading-tight">{paper.title}</h4>
+                  <p className="text-on-surface-variant text-sm italic">{paper.authors.join(', ')}</p>
                 </div>
               </div>
-              <button className="flex items-center gap-1 text-primary text-xs font-bold hover:gap-2 transition-all">
-                READ SUMMARY <span className="material-symbols-outlined text-sm text-secondary">arrow_forward</span>
-              </button>
+              <div className="mt-4 pt-4 border-t border-outline-variant/10 flex justify-between items-center">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1 text-on-surface-variant">
+                    <span className="material-symbols-outlined text-sm">format_quote</span>
+                    <span className="text-xs font-mono-technical">{paper.citation_count} Citations</span>
+                  </div>
+                </div>
+                <button 
+                  onClick={(e) => handleReadSummary(paper, e)}
+                  className="flex items-center gap-1 text-primary text-xs font-bold hover:gap-2 transition-all"
+                >
+                  READ SUMMARY 
+                  <span className="material-symbols-outlined text-sm text-secondary">
+                    arrow_forward
+                  </span>
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {results.length === 0 && !loading && !hasSearched && (
             <p className="text-on-surface-variant italic">No recent discoveries yet. Try searching!</p>
         )}

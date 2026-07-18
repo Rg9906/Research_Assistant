@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import DiscoveryFeed from './components/DiscoveryFeed';
 import ResearchLibrary from './components/ResearchLibrary';
+import PaperSummary from './components/PaperSummary';
 
 function App() {
   return (
@@ -11,7 +12,7 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<DiscoveryFeed />} />
           <Route path="library" element={<ResearchLibrary />} />
-          {/* We will add PaperSummary and Chat here as needed */}
+          <Route path="paper/:paperId" element={<PaperSummary />} />
         </Route>
       </Routes>
     </BrowserRouter>

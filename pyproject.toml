@@ -21,6 +21,10 @@ dependencies = [
     "langgraph>=0.1.0,<0.3.0",
     "fastapi>=0.100,<1.0",
     "uvicorn>=0.23,<1.0",
+    "llama-index>=0.10.0",
+    "llama-index-core>=0.10.0",
+    "llama-index-embeddings-huggingface>=0.1.0",
+    "llama-index-llms-openai>=0.1.0",
 ]
 
 [project.optional-dependencies]

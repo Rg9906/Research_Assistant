@@ -24,7 +24,7 @@ const Layout: React.FC = () => {
         </div>
       </nav>
 
-      <div className="pt-24 pb-32">
+      <div className="pt-24 pb-32 md:pl-[72px]">
         <Outlet />
       </div>
 
