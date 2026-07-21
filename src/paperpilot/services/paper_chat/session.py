@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
@@ -32,6 +31,7 @@ from llama_index.core.schema import NodeWithScore, QueryBundle
 from paperpilot.config import get_settings
 from paperpilot.core.models import PaperMetadata
 from paperpilot.document.downloader import PDFDownloader
+from paperpilot.llm import LLMConfigurationError, build_llama_llm
 from paperpilot.services.paper_chat.exceptions import (
     IndexBuildError,
     PDFDownloadError,
@@ -51,22 +51,43 @@ def compute_pdf_sha256(file_path: Path) -> str:
     return hasher.hexdigest()
 
 
-def _extract_source_nodes(response: Any, default_paper_id: Optional[UUID] = None) -> List[Dict[str, Any]]:
-    """Build structured citation dicts from a LlamaIndex response's source_nodes.
+def extract_page_number(meta: Dict[str, Any]) -> str | None:
+    """Pull a 1-indexed page number out of a node's metadata, if there is one.
 
-    Shared by PaperSession (single-paper chat/query) and
-    PaperSessionManager.chat_across_papers (multi-paper chat), since both
-    need to turn `response.source_nodes` into the same citation shape. Each
-    node's own `paper_id` metadata (set in `_parse_pdf`) is preferred so
-    multi-paper results are attributed to the paper they actually came from;
-    `default_paper_id` is only a fallback for single-paper callers.
+    Readers disagree on where the page lives. `SimpleDirectoryReader` sets
+    `page_label`, but `PyMuPDFReader` — the primary reader here — stores it in
+    `source`, which is why citations previously all rendered as "Page N/A"
+    despite the page being right there in the metadata.
+
+    `source` is only trusted when it looks like a page number: other loaders use
+    that key for a filename or URL, and "Page data/papers/x.pdf" would be worse
+    than no citation at all.
+    """
+    for key in ("page_label", "page_number", "page"):
+        value = meta.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+
+    source = meta.get("source")
+    if source is not None and str(source).strip().isdigit():
+        return str(source).strip()
+    return None
+
+
+def build_citations(
+    nodes: List[NodeWithScore], default_paper_id: Optional[UUID] = None
+) -> List[Dict[str, Any]]:
+    """Turn retrieved nodes into the API's citation shape.
+
+    Public because the grounded-QA service retrieves nodes directly (no
+    LlamaIndex response object to unwrap) but must return citations in exactly
+    the same shape as the chat path, so the frontend renders both identically.
     """
     sources = []
-    source_nodes = getattr(response, "source_nodes", []) or []
-    for rank, node_with_score in enumerate(source_nodes, start=1):
+    for rank, node_with_score in enumerate(nodes, start=1):
         node = node_with_score.node
         meta = node.metadata or {}
-        page_num = meta.get("page_label") or meta.get("page_number") or meta.get("page")
+        page_num = extract_page_number(meta)
         paper_id = meta.get("paper_id") or (str(default_paper_id) if default_paper_id else None)
 
         sources.append({
@@ -80,6 +101,18 @@ def _extract_source_nodes(response: Any, default_paper_id: Optional[UUID] = None
             "metadata": meta,
         })
     return sources
+
+
+def _extract_source_nodes(response: Any, default_paper_id: Optional[UUID] = None) -> List[Dict[str, Any]]:
+    """Build citations from a LlamaIndex response's source_nodes.
+
+    Shared by PaperSession (single-paper chat/query) and
+    PaperSessionManager.chat_across_papers (multi-paper chat). Each node's own
+    `paper_id` metadata (set in `_parse_pdf`) is preferred so multi-paper
+    results are attributed to the paper they actually came from;
+    `default_paper_id` is only a fallback for single-paper callers.
+    """
+    return build_citations(getattr(response, "source_nodes", []) or [], default_paper_id)
 
 
 class MultiPaperRetriever(BaseRetriever):
@@ -155,6 +188,17 @@ class PaperSession:
                 )
             except Exception as e:
                 logger.warning("Could not initialize LlamaIndex Reranker: %s", e)
+
+    @property
+    def node_postprocessors(self) -> List[Any]:
+        """The relevance filters (similarity cutoff, optional reranker) for this paper.
+
+        Public because callers outside this module — notably the grounded-QA
+        service, which retrieves without generating — must apply the *same*
+        filtering the chat engine would, or they would feed the Tutor chunks
+        the chat path considers too weak to use.
+        """
+        return self._node_postprocessors
 
     def _build_chat_engine(self, chat_history: Optional[List[ChatMessage]] = None) -> Any:
         """Construct a fresh LlamaIndex chat engine seeded with the given history.
@@ -273,8 +317,6 @@ class PaperSessionManager:
 
     def _configure_llama_defaults(self) -> None:
         """Configure LlamaIndex embedding and LLM defaults centrally from Settings."""
-        api_key = os.environ.get("OPENAI_API_KEY") or self.settings.openai_api_key
-
         # 1. Embedding Model
         try:
             from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -283,18 +325,16 @@ class PaperSessionManager:
         except Exception as e:
             logger.warning("Could not load configured embedding model '%s': %s", self.settings.rag_embedding_model, e)
 
-        # 2. LLM Model
-        if api_key:
-            try:
-                from llama_index.llms.openai import OpenAI
-                LlamaSettings.llm = OpenAI(
-                    model=self.settings.rag_llm_model,
-                    temperature=self.settings.llm_temperature,
-                    api_key=api_key,
-                )
-                logger.info("Configured LlamaIndex OpenAI LLM (%s)", self.settings.rag_llm_model)
-            except Exception as e:
-                logger.warning("Could not initialize OpenAI LLM: %s", e)
+        # 2. LLM Model — provider choice and fallback order are owned by
+        # paperpilot.llm so this stack and the LangChain agents can't end up on
+        # different backends. A missing LLM is logged rather than raised: the
+        # manager is constructed at import/startup, and indexing plus retrieval
+        # still work without an LLM. Chat itself will fail later, loudly, at the
+        # point a user actually asks a question.
+        try:
+            LlamaSettings.llm = build_llama_llm(self.settings)
+        except LLMConfigurationError as e:
+            logger.error("LlamaIndex LLM unavailable — paper chat will fail: %s", e)
 
     def _get_paper_dir(self, paper_id: UUID | str) -> Path:
         """Storage Layout: storage/papers/paper_<paper_id>/."""
@@ -448,6 +488,64 @@ class PaperSessionManager:
         self._active_sessions[paper_id_str] = session
         return session
 
+    def retrieve_across_papers(
+        self,
+        papers: List[PaperMetadata],
+        query: str,
+        similarity_top_k: Optional[int] = None,
+        apply_postprocessors: bool = True,
+    ) -> List[NodeWithScore]:
+        """Retrieve the most relevant nodes across every paper — no generation.
+
+        `chat_across_papers` retrieves *and* generates in one LlamaIndex call,
+        which is what you want for the default chat path. The grounded-QA
+        service needs the retrieval half on its own, because generation there
+        is done by the TutorAgent under a strict grounding prompt and audited
+        by the CriticAgent (see services/grounded_qa.py). Splitting retrieval
+        out here keeps a single implementation of "search this workspace"
+        rather than a second retriever living in the QA service.
+
+        By default applies the same node postprocessors (similarity cutoff,
+        optional reranker) the chat path applies, so both see the same evidence.
+
+        `apply_postprocessors=False` exists for whole-document tasks like
+        summarization. The cutoff scores chunks by similarity *to the query*,
+        which is right for a question ("what is multi-head attention?") and
+        actively wrong for an instruction ("summarize this paper in five
+        sentences") — an instruction resembles no passage in the paper, so
+        every chunk falls below the threshold and the caller is handed nothing
+        to summarize. Callers that disable it are asking for a representative
+        sample of the document rather than the answer to a question.
+        """
+        if not papers:
+            raise ValueError("retrieve_across_papers requires at least one paper.")
+
+        sessions = [
+            self.get_or_create_session(metadata=paper, pdf_url=paper.pdf_url) for paper in papers
+        ]
+        top_k = similarity_top_k or self.settings.rag_top_k
+
+        try:
+            retriever = MultiPaperRetriever(sessions, similarity_top_k=top_k)
+            nodes = retriever.retrieve(query)
+
+            if apply_postprocessors:
+                for postprocessor in sessions[0].node_postprocessors:
+                    nodes = postprocessor.postprocess_nodes(nodes, query_bundle=QueryBundle(query))
+
+            logger.info(
+                "Retrieved %d nodes across %d paper(s) for query '%s' (filtered=%s)",
+                len(nodes),
+                len(sessions),
+                query,
+                apply_postprocessors,
+            )
+            return nodes
+        except Exception as e:
+            titles = ", ".join(p.title for p in papers)
+            logger.error("Retrieval failed across papers [%s]: %s", titles, e)
+            raise QueryExecutionError(f"Failed to retrieve across papers [{titles}]: {e}") from e
+
     def chat_across_papers(
         self,
         papers: List[PaperMetadata],
@@ -488,7 +586,7 @@ class PaperSessionManager:
                 # PaperSessionManager's settings (similarity cutoff + optional
                 # reranker), so reusing the first session's list applies the
                 # same relevance filtering here as a single-paper chat would.
-                node_postprocessors=sessions[0]._node_postprocessors,
+                node_postprocessors=sessions[0].node_postprocessors,
             )
             response = chat_engine.chat(message)
             sources = _extract_source_nodes(response)

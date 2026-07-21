@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { processPaper, chatWithWorkspace } from '../api/client';
-import type { Paper } from '../api/client';
+import { processPaper, chatWithWorkspace, fetchSummaryLevels, summarizePaper } from '../api/client';
+import type { Paper, SummaryLevel } from '../api/client';
 import { useAgentActivity } from '../context/AgentActivityContext';
+import AnswerMessage from './AnswerMessage';
+import type { AgentMessage } from './AnswerMessage';
 
 const LOADING_MESSAGES = [
   "Brewing coffee for the AI...",
@@ -14,19 +16,10 @@ const LOADING_MESSAGES = [
   "Almost there..."
 ];
 
-interface SummaryTab {
-  id: string;
-  label: string;
-  prompt: string;
-}
-
-const SUMMARY_TABS: SummaryTab[] = [
-  { id: 'quick', label: 'Quick', prompt: 'Summarize this paper in five clear sentences.' },
-  { id: 'beginner', label: 'Beginner', prompt: "Explain this paper as if I'm an undergraduate student, avoiding heavy jargon and defining any technical terms you use." },
-  { id: 'technical', label: 'Technical', prompt: 'Give a graduate/researcher-level technical explanation of this paper, focusing on the methodology.' },
-  { id: 'contribution', label: 'Contribution', prompt: "List this paper's key contributions as concise bullet points." },
-  { id: 'limitations', label: 'Limitations', prompt: 'What are the limitations and weaknesses of this paper?' },
-];
+// The abstract is shown verbatim from search metadata — no LLM call, and it is
+// available before the paper has been indexed. Every other tab comes from the
+// backend's summary-level catalogue (/api/summary-levels).
+const ABSTRACT_TAB = { id: 'abstract', label: 'Abstract', difficulty: '' };
 
 const PaperSummary: React.FC = () => {
   const { state } = useLocation();
@@ -38,14 +31,23 @@ const PaperSummary: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processError, setProcessError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
-  const [messages, setMessages] = useState<{ role: 'user' | 'agent'; content: string }[]>([]);
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [loadingMsgIndex, setLoadingMsgIndex] = useState(0);
 
-  const [activeTab, setActiveTab] = useState('quick');
+  const [levels, setLevels] = useState<SummaryLevel[]>([]);
+  const [activeTab, setActiveTab] = useState(ABSTRACT_TAB.id);
   const [tabContent, setTabContent] = useState<Record<string, string>>({});
   const [tabLoading, setTabLoading] = useState(false);
+
+  // Tabs are whatever the backend offers, so adding a summary level is a
+  // backend-only change. A failure here just leaves the abstract tab.
+  useEffect(() => {
+    fetchSummaryLevels()
+      .then(setLevels)
+      .catch((err) => console.error('Could not load summary levels', err));
+  }, []);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -95,8 +97,14 @@ const PaperSummary: React.FC = () => {
     setIsTyping(true);
 
     try {
-      const answer = await withActivity('Answering from paper...', () => chatWithWorkspace(workspaceId, userMessage));
-      setMessages(prev => [...prev, { role: 'agent', content: answer }]);
+      const result = await withActivity('Answering from paper...', () => chatWithWorkspace(workspaceId, userMessage));
+      setMessages(prev => [...prev, {
+        role: 'agent',
+        content: result.answer,
+        citations: result.citations,
+        approved: result.approved,
+        refused: result.refused,
+      }]);
     } catch (err) {
       console.error(err);
       setMessages(prev => [...prev, { role: 'agent', content: 'Sorry, I encountered an error answering your question.' }]);
@@ -105,19 +113,18 @@ const PaperSummary: React.FC = () => {
     }
   };
 
-  const handleTabClick = async (tabId: string) => {
-    setActiveTab(tabId);
-    if (tabId === 'quick' || tabContent[tabId] || !workspaceId) return;
-
-    const tab = SUMMARY_TABS.find(t => t.id === tabId);
-    if (!tab) return;
+  const loadSummary = async (tabId: string, regenerate = false) => {
+    const tab = levels.find(t => t.id === tabId);
+    if (!tab || !workspaceId) return;
 
     setTabLoading(true);
     try {
-      const answer = await withActivity(`Generating ${tab.label.toLowerCase()} view...`, () =>
-        chatWithWorkspace(workspaceId, tab.prompt)
+      // Summaries are cached server-side per paper+level, so revisiting a tab
+      // is instant and costs nothing; `regenerate` is the deliberate opt-out.
+      const result = await withActivity(`Generating ${tab.label.toLowerCase()} view...`, () =>
+        summarizePaper(paper.paper_id, tabId, regenerate)
       );
-      setTabContent(prev => ({ ...prev, [tabId]: answer }));
+      setTabContent(prev => ({ ...prev, [tabId]: result.summary }));
     } catch (err) {
       console.error(err);
       setTabContent(prev => ({ ...prev, [tabId]: 'Sorry, could not generate this view. Please try again.' }));
@@ -126,7 +133,14 @@ const PaperSummary: React.FC = () => {
     }
   };
 
-  const activeTabMeta = SUMMARY_TABS.find(t => t.id === activeTab);
+  const handleTabClick = async (tabId: string) => {
+    setActiveTab(tabId);
+    if (tabId === ABSTRACT_TAB.id || tabContent[tabId]) return;
+    await loadSummary(tabId);
+  };
+
+  const allTabs = [ABSTRACT_TAB, ...levels];
+  const activeTabMeta = allTabs.find(t => t.id === activeTab);
 
   return (
     <div className="min-h-screen bg-background text-on-background font-body-ui">
@@ -157,7 +171,7 @@ const PaperSummary: React.FC = () => {
 
           {/* Tab Selector */}
           <div className="flex gap-2 p-1 bg-surface-container rounded-xl overflow-x-auto scrollbar-hide">
-            {SUMMARY_TABS.map(tab => (
+            {allTabs.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => handleTabClick(tab.id)}
@@ -175,7 +189,7 @@ const PaperSummary: React.FC = () => {
           {/* Content Area */}
           <section className="space-y-6">
             <article className="font-body-reading text-body-reading text-on-surface leading-relaxed max-w-[800px]">
-              {activeTab === 'quick' ? (
+              {activeTab === ABSTRACT_TAB.id ? (
                 <p className="mb-6 whitespace-pre-wrap">{paper.abstract}</p>
               ) : !workspaceId ? (
                 <p className="text-on-surface-variant italic">
@@ -187,7 +201,19 @@ const PaperSummary: React.FC = () => {
                   Generating {activeTabMeta?.label.toLowerCase()} view...
                 </p>
               ) : (
-                <p className="mb-6 whitespace-pre-wrap">{tabContent[activeTab]}</p>
+                <>
+                  <p className="mb-4 whitespace-pre-wrap">{tabContent[activeTab]}</p>
+                  {tabContent[activeTab] && (
+                    <button
+                      onClick={() => loadSummary(activeTab, true)}
+                      disabled={tabLoading}
+                      className="flex items-center gap-1.5 text-xs font-bold text-secondary hover:underline disabled:opacity-50"
+                    >
+                      <span className={`material-symbols-outlined text-sm ${tabLoading ? 'animate-spin' : ''}`}>refresh</span>
+                      Regenerate
+                    </button>
+                  )}
+                </>
               )}
             </article>
           </section>
@@ -281,11 +307,7 @@ const PaperSummary: React.FC = () => {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] p-3 rounded-lg text-sm ${msg.role === 'user' ? 'bg-primary-container text-on-primary-container rounded-tr-none' : 'bg-surface-container text-on-surface rounded-tl-none border border-outline-variant/20'}`}>
-                  {msg.content}
-                </div>
-              </div>
+              <AnswerMessage key={idx} message={msg} />
             ))}
             {isTyping && (
               <div className="flex justify-start">

@@ -30,6 +30,14 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
+# Anchor the .env lookup to the repository root rather than the process CWD.
+# `env_file=".env"` is resolved relative to wherever the process was started,
+# and the documented way to run the API is `uvicorn app.api:app` from inside
+# src/ — so a repo-root .env was silently ignored and any key set only there
+# (not also exported into the environment) looked unconfigured. A CWD-local
+# .env still wins, since pydantic-settings gives precedence to the last file.
+_REPO_ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
+
 
 class Settings(BaseSettings):
     """Application settings with sensible defaults for local development.
@@ -76,10 +84,21 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 5
 
     # -- LLM (Milestone 3+) --
+    # `llm_provider` names the preferred backend ("openai", "gemini"/"google",
+    # or "groq"). It is a preference, not a hard requirement: paperpilot.llm
+    # tries it first and then falls back to any other provider that has an API
+    # key, so a missing key degrades chat to a working provider instead of
+    # taking the app down. Per-provider model ids live alongside their keys;
+    # OpenAI keeps its two historical settings (llm_model_name for the agents,
+    # rag_llm_model below for the RAG engine).
     llm_provider: str = "openai"
     llm_model_name: str = "gpt-4o-mini"
     llm_temperature: float = 0.0
     openai_api_key: str = ""
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.1-8b-instant"
 
     # -- LlamaIndex & RAG Document Intelligence Settings --
     rag_chunk_size: int = 512
@@ -88,6 +107,22 @@ class Settings(BaseSettings):
     rag_similarity_threshold: float = 0.7
     rag_embedding_model: str = "BAAI/bge-small-en-v1.5"
     rag_llm_model: str = "gpt-4o-mini"
+    # Grounded QA (services/grounded_qa.py): route chat through the
+    # Tutor/Critic contract instead of LlamaIndex's default chat prompts.
+    # Disable to fall back to the plain LlamaIndex chat path.
+    # Summaries need broad document coverage, not the few chunks nearest one
+    # query, so they retrieve more widely than chat (and with the similarity
+    # cutoff disabled — see services/summarizer.py).
+    # 6 rather than 10: the critic re-sends the whole context to audit the
+    # answer, so each summary costs roughly double its chunk budget in tokens.
+    # 10 chunks overran a Groq free-tier 6000 TPM limit in live testing.
+    rag_summary_top_k: int = 6
+    rag_grounded_qa_enabled: bool = True
+    rag_max_critique_retries: int = 2
+    # Set false on small per-minute LLM quotas: the audit re-sends the whole
+    # context, roughly doubling tokens per answer. Answers stay grounded (the
+    # Tutor's contract is unchanged), they are just not independently checked.
+    rag_critique_enabled: bool = True
     rag_rerank_enabled: bool = False
     rag_rerank_model: str = "BAAI/bge-reranker-base"
     rag_rerank_top_n: int = 3
@@ -95,14 +130,24 @@ class Settings(BaseSettings):
 
     # -- Academic Search (Milestone 4+) --
     semantic_scholar_api_key: str = ""
+    # Semantic Scholar enforces a per-key quota (1 rps on the standard grant).
+    # Requests are paced client-side to that rate rather than discovered via
+    # 429s — see search/rate_limit.py. Raise only if your key's quota is higher.
+    semantic_scholar_rate_limit_rps: float = 1.0
+    # Backstop for when another process sharing the key pushes us over anyway.
+    # Observed in practice: Semantic Scholar can 429 the very first request of a
+    # session even when correctly paced, so a budget of 2 (1s + 2s) was enough
+    # to lose an entire search. 3 buys 1s + 2s + 4s.
+    semantic_scholar_max_retries: int = 3
     search_weight_similarity: float = 0.5
     search_weight_citations: float = 0.3
     search_weight_recency: float = 0.2
     search_decay_rate: float = 0.05
 
     model_config = {
-        # Read from .env file in the project root
-        "env_file": ".env",
+        # Read the repo-root .env, then any .env in the current working
+        # directory (which takes precedence). See _REPO_ROOT_ENV above.
+        "env_file": (str(_REPO_ROOT_ENV), ".env"),
         # Don't fail if .env file doesn't exist
         "env_file_encoding": "utf-8",
         # Allow extra fields from environment without crashing

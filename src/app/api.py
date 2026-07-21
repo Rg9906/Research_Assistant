@@ -1,4 +1,20 @@
+import sys
+from pathlib import Path
+
+# `app` is a namespace package, not an installed one (see CLAUDE.md §2), so
+# `from app.utils import ...` below only resolves if src/ is on sys.path. Adding
+# it here lets the server be started from the repo root as well as from src/.
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import logging
+from contextlib import asynccontextmanager
+
+# Must run before anything opens a TLS connection (model downloads, provider
+# SDKs), so it sits above those imports deliberately. See paperpilot/net.py.
+from paperpilot.net import enable_system_trust_store
+
+enable_system_trust_store()
+
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -10,8 +26,13 @@ from app.utils import (
     get_search_agent,
     get_paper_session_manager,
     get_workspace_chat_store,
+    get_embedding_engine,
+    get_optional_grounded_qa_service,
+    get_summarizer_service,
     WorkspaceChatStore,
 )
+from paperpilot.services.grounded_qa import GroundedQAService
+from paperpilot.services.summarizer import SUMMARY_LEVELS, SummarizerService
 from paperpilot.core.models import PaperMetadata
 from paperpilot.workspace.manager import WorkspaceManager
 from paperpilot.search.agent import SearchAgent
@@ -20,7 +41,31 @@ from paperpilot.services.paper_chat.exceptions import PaperChatException
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="PaperPilot AI API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Warm the embedding model and session manager before serving traffic.
+
+    Both singletons load (and on a cold machine, download) Hugging Face models
+    on first use. Doing that lazily inside the first /api/search or
+    /api/papers/process request makes that request appear to hang for minutes,
+    so pay the cost at startup instead. Warm-up failures are logged, not
+    raised: a server that starts degraded is more useful than one that refuses
+    to boot, and the real error surfaces on the request that needs the model.
+    """
+    for label, factory in (
+        ("search embedding engine", get_embedding_engine),
+        ("paper session manager", get_paper_session_manager),
+    ):
+        logger.info("Warming up %s...", label)
+        try:
+            factory()
+            logger.info("%s ready.", label.capitalize())
+        except Exception:
+            logger.exception("Failed to warm up %s", label)
+    yield
+
+
+app = FastAPI(title="PaperPilot AI API", lifespan=lifespan)
 
 # CORS: the frontend calls this API with plain `fetch` (no cookies/auth
 # headers), so we don't need `allow_credentials=True`. Combining a wildcard
@@ -62,9 +107,36 @@ class SearchQuery(BaseModel):
 
 class ChatMessage(BaseModel):
     query: str
+    # Explanation level, forwarded to both the tutor and the critic (which
+    # audits whether the answer actually matched the level asked for).
+    difficulty: str = "graduate/expert"
+
+class Citation(BaseModel):
+    rank: int
+    score: float
+    text: str
+    page_number: str
+    paper_id: Optional[str] = None
+    filename: str
 
 class ChatResponse(BaseModel):
     answer: str
+    # Citations and the audit verdict are part of the response contract, not
+    # debug extras: the product promise is answers traceable to the source, so
+    # the UI needs the evidence and the flag for "this failed review".
+    citations: List[Citation] = []
+    approved: bool = True
+    refused: bool = False
+    attempts: int = 1
+    critique: Optional[str] = None
+
+class SummaryResponse(BaseModel):
+    paper_id: UUID
+    level_id: str
+    summary: str
+    # Surfaced so the UI can distinguish "instant" from "just cost an LLM call"
+    # and offer regeneration only where it means something.
+    from_cache: bool
 
 class ProcessPaperRequest(BaseModel):
     paper_id: UUID
@@ -129,6 +201,7 @@ def chat_with_workspace(
     db: WorkspaceManager = Depends(get_db_manager),
     session_manager: PaperSessionManager = Depends(get_paper_session_manager),
     chat_store: WorkspaceChatStore = Depends(get_workspace_chat_store),
+    qa_service: Optional[GroundedQAService] = Depends(get_optional_grounded_qa_service),
 ):
     papers = db.get_workspace_papers(workspace_id)
     if not papers:
@@ -136,23 +209,83 @@ def chat_with_workspace(
 
     titles = ", ".join(p.title for p in papers)
     try:
-        # Fans the query out across every paper's index and merges results by
-        # score (see PaperSessionManager.chat_across_papers), so a workspace
-        # with several papers is grounded in all of them, not just the first.
-        # The underlying PaperSession/index is shared across every workspace
-        # that references a given paper, but conversation memory must not be
-        # — scope it by workspace_id so unrelated workspaces don't see each
-        # other's chat history.
+        # Both paths fan the query out across every paper's index rather than
+        # answering from the first paper only. The underlying PaperSession/index
+        # is shared across every workspace referencing a paper, but conversation
+        # memory must not be — it is scoped by workspace_id so unrelated
+        # workspaces don't see each other's history.
         history = chat_store.get(workspace_id)
-        answer, _sources, updated_history = session_manager.chat_across_papers(
+
+        if qa_service is not None:
+            # Retrieval -> TutorAgent (answer strictly from chunks, else refuse)
+            # -> CriticAgent audit -> bounded retry. See services/grounded_qa.py.
+            result = qa_service.answer(
+                papers, message.query, chat_history=history, difficulty=message.difficulty
+            )
+            chat_store.set(workspace_id, result.chat_history)
+            return ChatResponse(
+                answer=result.answer,
+                citations=[Citation(**{k: c[k] for k in Citation.model_fields}) for c in result.citations],
+                approved=result.approved,
+                refused=result.refused,
+                attempts=result.attempts,
+                critique=result.critique.feedback if result.critique else None,
+            )
+
+        answer, sources, updated_history = session_manager.chat_across_papers(
             papers, message.query, chat_history=history
         )
         chat_store.set(workspace_id, updated_history)
-        return ChatResponse(answer=answer)
+        return ChatResponse(
+            answer=answer,
+            citations=[Citation(**{k: c[k] for k in Citation.model_fields}) for c in sources],
+        )
     except PaperChatException as e:
         raise _fail(502, f"Chat failed for workspace papers [{titles}]: {e}", e)
     except Exception as e:
         raise _fail(500, f"Unexpected error during chat for workspace papers [{titles}]", e)
+
+@app.get("/api/summary-levels")
+def list_summary_levels():
+    """The catalogue of summary views, defined server-side.
+
+    The frontend renders whatever this returns instead of hardcoding its own
+    prompts, so adding a level is a backend-only change.
+    """
+    return {
+        "levels": [
+            {"id": level.id, "label": level.label, "difficulty": level.difficulty}
+            for level in SUMMARY_LEVELS
+        ]
+    }
+
+
+@app.post("/api/papers/{paper_id}/summary/{level_id}", response_model=SummaryResponse)
+def summarize_paper(
+    paper_id: UUID,
+    level_id: str,
+    regenerate: bool = False,
+    db: WorkspaceManager = Depends(get_db_manager),
+    summarizer: SummarizerService = Depends(get_summarizer_service),
+):
+    """Generate (or serve from cache) one summary level for an indexed paper."""
+    paper = db.get_paper_by_id(paper_id)
+    if paper is None:
+        raise HTTPException(status_code=404, detail="Paper not found. Process it first.")
+
+    try:
+        summary, from_cache = summarizer.summarize(paper, level_id, regenerate=regenerate)
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f"Unknown summary level '{level_id}'")
+    except PaperChatException as e:
+        raise _fail(502, f"Failed to summarize '{paper.title}' at level '{level_id}': {e}", e)
+    except Exception as e:
+        raise _fail(500, f"Unexpected error summarizing '{paper.title}'", e)
+
+    return SummaryResponse(
+        paper_id=paper_id, level_id=level_id, summary=summary, from_cache=from_cache
+    )
+
 
 @app.post("/api/papers/process")
 def process_paper(

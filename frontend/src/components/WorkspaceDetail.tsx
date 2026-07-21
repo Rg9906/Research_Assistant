@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { fetchWorkspacePapers, chatWithWorkspace } from '../api/client';
 import type { Paper } from '../api/client';
 import { useAgentActivity } from '../context/AgentActivityContext';
+import AnswerMessage from './AnswerMessage';
+import type { AgentMessage } from './AnswerMessage';
 
 const WorkspaceDetail: React.FC = () => {
   const { workspaceId } = useParams();
@@ -13,7 +15,7 @@ const WorkspaceDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [messages, setMessages] = useState<{ role: 'user' | 'agent'; content: string }[]>([]);
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
 
@@ -40,10 +42,19 @@ const WorkspaceDetail: React.FC = () => {
     setIsTyping(true);
 
     try {
-      const answer = await withActivity('Answering from workspace papers...', () =>
+      const result = await withActivity('Answering from workspace papers...', () =>
         chatWithWorkspace(workspaceId, userMessage)
       );
-      setMessages((prev) => [...prev, { role: 'agent', content: answer }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'agent',
+          content: result.answer,
+          citations: result.citations,
+          approved: result.approved,
+          refused: result.refused,
+        },
+      ]);
     } catch (err) {
       console.error(err);
       setMessages((prev) => [
@@ -105,11 +116,7 @@ const WorkspaceDetail: React.FC = () => {
                 <p className="text-on-surface-variant text-sm italic">Ask a question to get started.</p>
               )}
               {messages.map((msg, idx) => (
-                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] p-3 rounded-lg text-sm ${msg.role === 'user' ? 'bg-primary-container text-on-primary-container rounded-tr-none' : 'bg-surface-container text-on-surface rounded-tl-none border border-outline-variant/20'}`}>
-                    {msg.content}
-                  </div>
-                </div>
+                <AnswerMessage key={idx} message={msg} />
               ))}
               {isTyping && (
                 <div className="flex justify-start">

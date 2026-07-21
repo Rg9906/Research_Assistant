@@ -1,16 +1,18 @@
-import os
 import logging
 import threading
 from functools import lru_cache
 from typing import Dict, List
 from uuid import UUID
 
-from langchain_openai import ChatOpenAI
 from llama_index.core.llms import ChatMessage
 from paperpilot.config import get_settings
+from paperpilot.llm import LLMConfigurationError, build_chat_model
 from paperpilot.workspace.manager import WorkspaceManager
 from paperpilot.retrieval.embedder import EmbeddingEngine
+from paperpilot.agent.critic import CriticAgent
 from paperpilot.agent.tutor import TutorAgent
+from paperpilot.services.grounded_qa import GroundedQAService
+from paperpilot.services.summarizer import SummarizerService
 from paperpilot.search.agent import SearchAgent
 from paperpilot.search.ranker import PaperRanker
 from paperpilot.search.providers import ArxivProvider, SemanticScholarProvider
@@ -86,16 +88,62 @@ def get_search_agent() -> SearchAgent:
     ]
     return SearchAgent(providers=providers, ranker=ranker)
 
+@lru_cache(maxsize=1)
 def get_tutor_agent() -> TutorAgent:
+    """Build a TutorAgent on whichever LLM provider is configured and reachable.
+
+    Provider selection (and its fallback order) is owned by paperpilot.llm so
+    the agents and the LlamaIndex RAG engine can't drift onto different
+    backends. Raises LLMConfigurationError if nothing can be built.
+
+    Cached because the agent is stateless (all conversation state is passed in
+    per call) and constructing the chat model re-reads settings and re-imports
+    the provider SDK.
+    """
+    return TutorAgent(chat_model=build_chat_model())
+
+
+@lru_cache(maxsize=1)
+def get_critic_agent() -> CriticAgent:
+    """CriticAgent sharing the same provider resolution as the tutor."""
+    return CriticAgent(chat_model=build_chat_model())
+
+
+def get_optional_grounded_qa_service() -> GroundedQAService | None:
+    """The grounded-QA service, or None if it is disabled or unavailable.
+
+    Returning None rather than raising lets the chat endpoint fall back to the
+    plain LlamaIndex path: if the agents' chat model can't be built (no key, SDK
+    missing), degraded chat beats a 500 on every question. It is also the seam
+    tests override to inject a stub service.
+    """
+    if not get_settings().rag_grounded_qa_enabled:
+        return None
+    try:
+        return get_grounded_qa_service()
+    except LLMConfigurationError as e:
+        logger.error("Grounded QA unavailable, falling back to default chat: %s", e)
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_summarizer_service() -> SummarizerService:
+    """Multi-level summarizer sharing the grounded-QA path (and its critic)."""
+    return SummarizerService(qa_service=get_grounded_qa_service())
+
+
+@lru_cache(maxsize=1)
+def get_grounded_qa_service() -> GroundedQAService:
+    """The production grounded-QA path: retrieve -> tutor -> critic -> retry.
+
+    Safe to cache: the service holds only its injected collaborators, and every
+    per-conversation value (history, question, difficulty) is a call argument.
+    """
     settings = get_settings()
-    api_key = os.environ.get("OPENAI_API_KEY") or settings.openai_api_key
-    if not api_key:
-        print("WARNING: OPENAI_API_KEY is not set. Tutor Agent will not work.")
-    
-    # Initialize ChatOpenAI with configured parameters for strict grounding
-    chat_model = ChatOpenAI(
-        model=settings.llm_model_name,
-        temperature=settings.llm_temperature,
-        openai_api_key=api_key
+    return GroundedQAService(
+        session_manager=get_paper_session_manager(),
+        tutor=get_tutor_agent(),
+        critic=get_critic_agent(),
+        max_retries=settings.rag_max_critique_retries,
+        critique_enabled=settings.rag_critique_enabled,
     )
-    return TutorAgent(chat_model=chat_model)
