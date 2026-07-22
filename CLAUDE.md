@@ -24,7 +24,7 @@ harder.
 | `src/paperpilot/` | Installable Python package (`pip install -e ".[dev]"`, hatchling). All domain logic lives here. |
 | `src/paperpilot/core/models.py` | Pydantic data contracts shared across the whole system: `PaperMetadata`, `TextChunk`, `ExtractedPage`, `ProcessedDocument`, `RetrievalResult`. Every module imports from here — this is the schema layer. |
 | `src/paperpilot/config.py` | `Settings` (pydantic-settings), `.env`-backed, `get_settings()` cached singleton. The `.env` path is anchored to the repo root (not the CWD) so running the API from `src/` still picks it up. |
-| `src/paperpilot/net.py` | `enable_system_trust_store()` — makes TLS verify against the OS trust store via `truststore`. Required on machines whose antivirus/proxy intercepts TLS, where `certifi` rejects every HTTPS call. Called at the top of `app/api.py`, before anything opens a connection. |
+| `src/paperpilot/net.py` | `enable_system_trust_store()` — makes TLS verify against the OS trust store via `truststore` (required on machines whose antivirus/proxy intercepts TLS, where `certifi` rejects every HTTPS call). `enable_hf_offline_if_cached()` — sets `HF_HUB_OFFLINE` when both embedding models are already cached, skipping the per-startup huggingface.co update check that adds minutes when that host is slow/unreachable (stays online on a first run so models can still download). Both called at the top of `app/api.py`, before anything opens a connection or loads a model. |
 | `src/paperpilot/search/rate_limit.py` | `RateLimiter` — thread-safe minimum-interval pacing for quota-limited APIs (Semantic Scholar). |
 | `src/paperpilot/llm/factory.py` | **Single source of truth for "which LLM backend do we talk to."** `resolve_provider_order()` implements the selection policy; `build_chat_model()` returns a LangChain `BaseChatModel` for the agents, `build_llama_llm()` returns a LlamaIndex `LLM` for the RAG stack. Both consume the same ordering, so the two stacks can't drift onto different providers. See §5. |
 | `src/paperpilot/document/downloader.py` | `PDFDownloader` — fetch, validate (magic bytes + PyMuPDF open), retry with backoff, scheme allowlist (http/https by default), and a streamed size cap. |
@@ -120,6 +120,10 @@ RAG implementation, and do not add a second retriever — extend
 `Settings` (pydantic-settings, `.env`-backed) — key groups:
 - Paths: `data_dir`, `papers_dir`, `index_dir`, `db_path`, `storage_papers_dir`.
 - Legacy chunking/ranking embedding: `embedding_model_name` (`all-MiniLM-L6-v2`) — used only by `PaperRanker` for title/abstract similarity scoring, not for paper chat.
+- **Retrieval shape**: `rag_top_k` (6) similarity hits **plus** `rag_lead_chunks`
+  (2) opening chunks selected by position, so every answer sees the paper's own
+  framing. `rag_similarity_threshold` (0.60) is calibrated to the embedding
+  model — see §7 before touching either it or `rag_embedding_model`.
 - RAG (LlamaIndex, Stack B): `rag_chunk_size`/`rag_chunk_overlap` (512/50), `rag_top_k`, `rag_embedding_model` (`BAAI/bge-small-en-v1.5`), `rag_llm_model` (`gpt-4o-mini`), `rag_similarity_threshold` (0.7 — wired into every session's `node_postprocessors` as a `SimilarityPostprocessor`, applied before the optional reranker), `rag_rerank_enabled`/`rag_rerank_model`/`rag_rerank_top_n`.
 - Grounded QA: `rag_grounded_qa_enabled` (default true — route chat through
   Tutor/Critic), `rag_max_critique_retries` (2; each retry costs two more LLM
@@ -291,6 +295,50 @@ These were all invisible to the offline suite — every one needed a real call.
   paced at its 1 rps grant, so `semantic_scholar_max_retries` was raised from
   2 to 3 — with 2 the retry budget ran out and an entire search returned no S2
   results at all.
+- **`rag_similarity_threshold=0.7` refused ordinary questions.** Measured on a
+  real paper with bge-small-en-v1.5: relevant questions score 0.65–0.77,
+  off-topic ones 0.48–0.57. The 0.7 default sat *inside* the relevant band, so
+  "What problem does this paper address?" retrieved **zero** chunks and was
+  refused. Now 0.60, in the empty gap between the two bands. **Lesson:** a
+  similarity threshold is a property of the embedding model — measure both
+  bands before setting one, and re-measure if `rag_embedding_model` changes.
+- `rag_top_k=3` compounded it: three chunks is often too little for a broad
+  question, and because the Tutor refuses rather than guesses, a thin context
+  budget surfaces as spurious refusals. Now 6.
+- The Tutor's refusal trigger was "context does not answer the question
+  completely and accurately", which small models read as "refuse unless
+  perfect". Narrowed to "nothing relevant at all", with an instruction to state
+  what the context doesn't cover. The refusal string and the ONLY-from-context
+  constraints are unchanged.
+- Startup can take minutes when Hugging Face DNS is unreachable: the embedding
+  loaders issue HEAD requests and retry 5× per model before falling back to the
+  local cache. `net.py::enable_hf_offline_if_cached` now sets `HF_HUB_OFFLINE`
+  automatically when the models are cached, so this is handled without a manual
+  env var (base model *load* time, a few minutes on a cold process, is separate
+  and unavoidable — that is compute, not network).
+- `PDFDownloader` now distinguishes **permanent** download failures (HTTP 4xx
+  except 408/429, or a response that isn't a valid PDF — e.g. a publisher
+  landing page) from transient ones, via `_permanent_reason`. Permanent
+  failures raise `PDFUnavailableError` (a `RuntimeError` subclass) immediately
+  with a human-readable message instead of burning the retry budget; transient
+  ones still retry with backoff. Note the common case is transient: a
+  `openAccessPdf` link that failed once often works on the next attempt.
+
+- **Document-level questions were unanswerable by construction.** "What problem
+  does this paper address?" / "What is this paper about?" retrieved only
+  mid-document pages and were refused: a paper's problem statement is prose that
+  shares almost no vocabulary with such a question, so vector similarity never
+  surfaces the abstract. Fixed with `PaperSession.get_lead_nodes` — the paper's
+  opening chunks (`rag_lead_chunks`, default 2) are selected **by position, not
+  similarity**, and prepended to every retrieval. Verified live: the question
+  now answers citing Page 1, while an off-topic question still refuses even
+  though the lead chunks are in its context, so the grounding contract holds.
+  **Lesson:** a pure top-k vector retriever answers "which passage resembles
+  this query"; some questions are about the document, not about a passage.
+  Two implementation details that matter: lead nodes are added *after* the
+  postprocessors (the similarity cutoff would otherwise drop them, since they
+  have no score), and they carry `score=None` rather than a fabricated score,
+  which would corrupt both the merge ranking and the citation list.
 
 ## 8. Feature status vs. the vision (`ProjectIdea.txt`)
 

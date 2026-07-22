@@ -37,11 +37,24 @@ CITATION = {
     "rank": 1,
     "node_id": "n1",
     "score": 0.91,
+    "is_lead": False,
     "text": "The Transformer uses multi-head attention.",
     "page_number": "3",
     "filename": "attention.pdf",
     "paper_id": str(PAPER.paper_id),
     "metadata": {"publication_year": "2017"},
+}
+
+LEAD_CITATION = {
+    "rank": 2,
+    "node_id": "n2",
+    "score": None,  # a lead chunk carries no similarity score
+    "is_lead": True,
+    "text": "Abstract: we propose the Transformer.",
+    "page_number": "1",
+    "filename": "attention.pdf",
+    "paper_id": str(PAPER.paper_id),
+    "metadata": {},
 }
 
 
@@ -120,6 +133,18 @@ class TestChatEndpoint:
         assert body["refused"] is False
         assert len(body["citations"]) == 1
         assert body["citations"][0]["page_number"] == "3"
+
+    def test_lead_chunk_citation_has_null_score_and_is_flagged(self, client):
+        override(get_optional_grounded_qa_service, StubQA(citations=[CITATION, LEAD_CITATION]))
+        body = client.post(f"/api/workspaces/{WORKSPACE_ID}/chat", json={"query": "About?"}).json()
+
+        cites = {c["rank"]: c for c in body["citations"]}
+        # A similarity hit keeps its score; a lead chunk is null + flagged, so
+        # the UI can label it "Intro" instead of rendering a misleading 0.00.
+        assert cites[1]["score"] == pytest.approx(0.91)
+        assert cites[1]["is_lead"] is False
+        assert cites[2]["score"] is None
+        assert cites[2]["is_lead"] is True
 
     def test_difficulty_is_forwarded_to_the_service(self, client):
         qa = StubQA()

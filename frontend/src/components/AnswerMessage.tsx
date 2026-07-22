@@ -80,9 +80,18 @@ const AnswerMessage: React.FC<{ message: AgentMessage }> = ({ message }) => {
                       <span className="text-[10px] font-mono-technical text-on-surface-variant uppercase truncate">
                         {citation.filename} · Page {citation.page_number}
                       </span>
-                      <span className="text-[10px] font-mono-technical text-outline shrink-0">
-                        {citation.score.toFixed(2)}
-                      </span>
+                      {/* Lead chunks (the paper's intro) have no similarity
+                          score — they're always included as context. Label
+                          them rather than showing a misleading "0.00". */}
+                      {citation.score === null ? (
+                        <span className="text-[10px] font-bold text-secondary uppercase tracking-wide shrink-0">
+                          Intro
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono-technical text-outline shrink-0">
+                          {citation.score.toFixed(2)}
+                        </span>
+                      )}
                     </div>
                     <p className="text-[11px] text-on-surface-variant leading-relaxed line-clamp-4">
                       {citation.text}

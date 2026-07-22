@@ -111,6 +111,15 @@ const DiscoveryFeed: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="bg-surface-container-high text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded uppercase">{paper.venue || 'ARXIV'}</span>
                     <span className="text-xs text-outline font-mono-technical">Published {paper.publication_year}</span>
+                    {/* Chat and summaries both require indexing the PDF, so a
+                        paper without one is abstract-only. Flag it here rather
+                        than letting the user discover it after two clicks. */}
+                    {!paper.pdf_url && (
+                      <span className="flex items-center gap-1 bg-surface-container-high text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded uppercase">
+                        <span className="material-symbols-outlined text-[11px]">lock</span>
+                        No PDF
+                      </span>
+                    )}
                   </div>
                   <h4 className="font-h2 text-xl text-on-surface group-hover:text-primary transition-colors leading-tight">{paper.title}</h4>
                   <p className="text-on-surface-variant text-sm italic">{paper.authors.join(', ')}</p>

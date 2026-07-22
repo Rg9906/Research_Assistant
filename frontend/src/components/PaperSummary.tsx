@@ -81,7 +81,14 @@ const PaperSummary: React.FC = () => {
       setMessages([{ role: 'agent', content: `Hello! I've read "${paper.title}". What would you like to know about it?` }]);
     } catch (err) {
       console.error(err);
-      setProcessError('Failed to process this paper for chat. Please try again.');
+      // Surface the backend's reason. "Failed to process, please try again"
+      // is actively misleading for the common permanent failures (no
+      // open-access PDF, paywalled link) where retrying can never work.
+      setProcessError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Failed to process this paper for chat. Please try again.'
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -127,7 +134,14 @@ const PaperSummary: React.FC = () => {
       setTabContent(prev => ({ ...prev, [tabId]: result.summary }));
     } catch (err) {
       console.error(err);
-      setTabContent(prev => ({ ...prev, [tabId]: 'Sorry, could not generate this view. Please try again.' }));
+      // Surface the backend's actual reason (e.g. "the link did not return a
+      // valid PDF") rather than a blanket "try again" — for a paper whose PDF
+      // can't be fetched, retrying can never succeed.
+      const reason =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not generate this view.';
+      setTabContent(prev => ({ ...prev, [tabId]: reason }));
     } finally {
       setTabLoading(false);
     }
@@ -193,7 +207,9 @@ const PaperSummary: React.FC = () => {
                 <p className="mb-6 whitespace-pre-wrap">{paper.abstract}</p>
               ) : !workspaceId ? (
                 <p className="text-on-surface-variant italic">
-                  Click "Chat with Paper" below to unlock the AI-generated {activeTabMeta?.label.toLowerCase()} view.
+                  {paper.pdf_url
+                    ? `Click "Chat with Paper" below to unlock the AI-generated ${activeTabMeta?.label.toLowerCase()} view.`
+                    : `This paper has no open-access PDF, so the ${activeTabMeta?.label.toLowerCase()} view can't be generated — summaries are written only from the paper's own text.`}
                 </p>
               ) : tabLoading && !tabContent[activeTab] ? (
                 <p className="text-on-surface-variant italic flex items-center gap-2">
@@ -275,19 +291,34 @@ const PaperSummary: React.FC = () => {
         </div>
       )}
 
-      {/* Floating Action Button */}
+      {/* Floating Action Button.
+          Chat requires indexing the PDF, so a paper with no open-access PDF
+          can never be chatted with. Say that up front instead of offering a
+          button whose only possible outcome is an error. */}
       {!chatOpen && !isProcessing && (
-        <button
-          onClick={workspaceId ? () => setChatOpen(true) : handleProcessPaper}
-          className="fixed bottom-24 right-6 md:right-12 z-50 text-white flex items-center gap-3 px-6 py-4 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all group bg-primary"
-        >
-          <span className="material-symbols-outlined group-hover:rotate-12 transition-transform">
-            forum
-          </span>
-          <span className="font-bold text-sm tracking-wide">
-            {workspaceId ? 'Open Chat' : 'Chat with Paper'}
-          </span>
-        </button>
+        paper.pdf_url ? (
+          <button
+            onClick={workspaceId ? () => setChatOpen(true) : handleProcessPaper}
+            className="fixed bottom-24 right-6 md:right-12 z-50 text-white flex items-center gap-3 px-6 py-4 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all group bg-primary"
+          >
+            <span className="material-symbols-outlined group-hover:rotate-12 transition-transform">
+              forum
+            </span>
+            <span className="font-bold text-sm tracking-wide">
+              {workspaceId ? 'Open Chat' : 'Chat with Paper'}
+            </span>
+          </button>
+        ) : (
+          <div className="fixed bottom-24 right-6 md:right-12 z-50 max-w-[280px] flex items-start gap-2.5 px-5 py-4 rounded-2xl shadow-2xl bg-surface-container-high border border-outline-variant/30">
+            <span className="material-symbols-outlined text-on-surface-variant text-[20px] shrink-0">
+              lock
+            </span>
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              No open-access PDF is available for this paper, so it can't be
+              indexed for chat. The abstract above is all we have.
+            </p>
+          </div>
+        )
       )}
 
       {/* Chat Interface Overlay */}

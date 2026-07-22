@@ -60,7 +60,8 @@ class StubSessionManager:
         self.calls: list[dict] = []
 
     def retrieve_across_papers(
-        self, papers, query, similarity_top_k=None, apply_postprocessors=True
+        self, papers, query, similarity_top_k=None, apply_postprocessors=True,
+        include_lead_chunks=None,
     ):
         self.queries.append(query)
         self.calls.append(

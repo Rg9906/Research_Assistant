@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
@@ -15,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ALLOWED_SCHEMES = ("http", "https")
 DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB — generous for a research paper PDF
+
+# 4xx codes that a retry might actually clear, so they are NOT treated as
+# permanent: 408 Request Timeout and 429 Too Many Requests are transient by
+# definition. Every other 4xx (403 paywall, 404 gone, 401 auth) will return the
+# same result no matter how many times we ask.
+_RETRYABLE_HTTP_4XX = {408, 429}
 
 
 def normalize_pdf_url(url: str) -> str:
@@ -34,6 +41,17 @@ def normalize_pdf_url(url: str) -> str:
 
 class UnsafeDownloadURLError(ValueError):
     """Raised when a PDF URL uses a scheme that is not in the downloader's allowlist."""
+
+
+class PDFUnavailableError(RuntimeError):
+    """The PDF cannot be fetched and retrying will not help.
+
+    Distinct from a transient network failure: this means the link is a paywall,
+    a dead URL, or a page that serves HTML instead of a PDF — common for the
+    `openAccessPdf` links Semantic Scholar returns for closed-access papers.
+    Carries a human-readable reason suitable for showing to the user, since a
+    RuntimeError subclass so existing `except RuntimeError` callers still catch it.
+    """
 
 
 class PDFDownloader:
@@ -157,6 +175,15 @@ class PDFDownloader:
             except Exception as e:
                 # Clean up temp file on failure
                 temp_path.unlink(missing_ok=True)
+
+                # A permanent failure will produce the identical result on every
+                # retry, so stop immediately rather than burning the retry budget
+                # (and the user's time) re-fetching a paywall or a landing page.
+                permanent = self._permanent_reason(e)
+                if permanent is not None:
+                    logger.warning("PDF unavailable at %s: %s", normalized_url, permanent)
+                    raise PDFUnavailableError(permanent) from e
+
                 logger.warning(
                     "Download attempt %d failed for URL %s: %s", attempt, normalized_url, e
                 )
@@ -164,7 +191,8 @@ class PDFDownloader:
                 if attempt >= self.max_retries:
                     logger.error("All download attempts failed for URL: %s", normalized_url)
                     raise RuntimeError(
-                        f"Failed to download PDF from {normalized_url} after {self.max_retries} attempts."
+                        f"Could not download the PDF after {self.max_retries} attempts "
+                        f"(network error: {e})."
                     ) from e
 
                 # Backoff sleep
@@ -172,6 +200,32 @@ class PDFDownloader:
                 backoff *= 2.0
 
         raise RuntimeError("Unexpected end of download loop.")
+
+    @staticmethod
+    def _permanent_reason(error: Exception) -> str | None:
+        """Return a user-facing reason if `error` means retrying is pointless, else None.
+
+        Two permanent cases dominate for third-party `openAccessPdf` links:
+        an HTTP 4xx (the file is gone, forbidden, or behind auth), and a
+        successful fetch of something that is not a PDF (a publisher landing
+        page served as HTML). Both are captured here so the caller can show a
+        clear message instead of a raw stack trace.
+        """
+        if isinstance(error, urllib.error.HTTPError):
+            if 400 <= error.code < 500 and error.code not in _RETRYABLE_HTTP_4XX:
+                return (
+                    f"The publisher returned HTTP {error.code} for this link — the PDF is "
+                    "likely behind a subscription or login, or the link is dead."
+                )
+            return None  # 5xx / 408 / 429 may succeed on retry
+        if isinstance(error, ValueError):
+            # Raised by _validate_pdf and the size guards: the server responded,
+            # but with something that is not a usable PDF.
+            return (
+                "The link did not return a valid PDF file — it may be a web page or an "
+                "unsupported format rather than a downloadable paper."
+            )
+        return None
 
     def _validate_pdf(self, file_path: Path) -> None:
         """Validate that the downloaded file is a valid PDF."""

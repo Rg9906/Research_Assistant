@@ -11,9 +11,21 @@ from contextlib import asynccontextmanager
 
 # Must run before anything opens a TLS connection (model downloads, provider
 # SDKs), so it sits above those imports deliberately. See paperpilot/net.py.
-from paperpilot.net import enable_system_trust_store
+from paperpilot.net import enable_hf_offline_if_cached, enable_system_trust_store
 
 enable_system_trust_store()
+
+# If both embedding models are already cached, skip Hugging Face's per-startup
+# update check (which can add minutes when huggingface.co is unreachable). Done
+# here, before the embedding libraries are imported, so HF_HUB_OFFLINE is set in
+# time to take effect. Falls through to online mode on a first run.
+from paperpilot.config import get_settings as _get_settings
+
+_s = _get_settings()
+enable_hf_offline_if_cached(
+    [_s.rag_embedding_model, _s.embedding_model_name]
+    + ([_s.rag_rerank_model] if _s.rag_rerank_enabled else [])
+)
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -113,7 +125,10 @@ class ChatMessage(BaseModel):
 
 class Citation(BaseModel):
     rank: int
-    score: float
+    # None for a lead chunk (the paper's intro, always included as context and
+    # not scored by similarity). The UI labels these instead of showing 0.00.
+    score: Optional[float] = None
+    is_lead: bool = False
     text: str
     page_number: str
     paper_id: Optional[str] = None

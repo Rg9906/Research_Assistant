@@ -53,7 +53,10 @@ export const fetchWorkspacePapers = async (workspaceId: string): Promise<Paper[]
 
 export interface Citation {
   rank: number;
-  score: number;
+  // null for a lead chunk: the paper's intro, always included as context rather
+  // than matched by similarity. The UI shows a label instead of a score for these.
+  score: number | null;
+  is_lead: boolean;
   text: string;
   page_number: string;
   paper_id: string | null;

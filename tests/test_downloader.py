@@ -1,12 +1,18 @@
 """Unit tests for the PDFDownloader."""
 
+import urllib.error
 from pathlib import Path
 from uuid import uuid4
 
 import fitz
 import pytest
 
-from paperpilot.document.downloader import PDFDownloader, UnsafeDownloadURLError, normalize_pdf_url
+from paperpilot.document.downloader import (
+    PDFDownloader,
+    PDFUnavailableError,
+    UnsafeDownloadURLError,
+    normalize_pdf_url,
+)
 
 
 def test_url_normalization():
@@ -85,6 +91,55 @@ def test_download_invalid_pdf_throws(tmp_path):
     # Temp file should be cleaned up
     temp_path = papers_dir / f"tmp_{paper_id}.pdf"
     assert not temp_path.exists()
+
+
+class TestPermanentFailures:
+    """A dead / paywalled / non-PDF link must fail fast, not burn the retry budget."""
+
+    def test_http_403_fails_immediately_without_retrying(self, tmp_path, monkeypatch):
+        downloader = PDFDownloader(papers_dir=tmp_path / "papers", max_retries=3)
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+
+        monkeypatch.setattr("paperpilot.document.downloader.urllib.request.urlopen", fake_urlopen)
+
+        with pytest.raises(PDFUnavailableError, match="subscription or login"):
+            downloader.download_pdf(uuid4(), "https://publisher.example/paper")
+        assert calls["n"] == 1, "a 403 will never clear, so it must not be retried"
+
+    def test_429_is_still_retried(self, tmp_path, monkeypatch):
+        downloader = PDFDownloader(papers_dir=tmp_path / "papers", max_retries=2)
+        calls = {"n": 0}
+        monkeypatch.setattr("paperpilot.document.downloader.time.sleep", lambda s: None)
+
+        def fake_urlopen(req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", {}, None)
+
+        monkeypatch.setattr("paperpilot.document.downloader.urllib.request.urlopen", fake_urlopen)
+
+        with pytest.raises(RuntimeError):
+            downloader.download_pdf(uuid4(), "https://api.example/paper")
+        assert calls["n"] == 2, "429 is transient and should exhaust the retry budget"
+
+    def test_non_pdf_content_is_reported_as_permanent(self, tmp_path):
+        """A link that serves HTML (a landing page) is unavailable, not retryable."""
+        papers_dir = tmp_path / "papers"
+        downloader = PDFDownloader(
+            papers_dir=papers_dir, max_retries=3, allowed_schemes=("http", "https", "file")
+        )
+        html = tmp_path / "landing.pdf"
+        html.write_text("<html><body>Please subscribe to read this paper.</body></html>")
+
+        with pytest.raises(PDFUnavailableError, match="valid PDF"):
+            downloader.download_pdf(uuid4(), html.as_uri())
+
+    def test_unavailable_error_is_a_runtime_error(self):
+        # Existing callers catch RuntimeError; the new type must stay compatible.
+        assert issubclass(PDFUnavailableError, RuntimeError)
 
 
 def test_download_rejects_disallowed_scheme(tmp_path):

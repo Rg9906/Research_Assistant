@@ -103,8 +103,29 @@ class Settings(BaseSettings):
     # -- LlamaIndex & RAG Document Intelligence Settings --
     rag_chunk_size: int = 512
     rag_chunk_overlap: int = 50
-    rag_top_k: int = 3
-    rag_similarity_threshold: float = 0.7
+    # The paper's opening chunks (title/abstract/intro) are always included in
+    # retrieved context, on top of the similarity hits. Vector search cannot
+    # find them for document-level questions — "what problem does this paper
+    # address?" shares no vocabulary with a problem statement — so without this
+    # such questions get refused. 2 chunks ≈ the abstract plus the start of the
+    # introduction. Set to 0 to disable (pure similarity retrieval).
+    rag_lead_chunks: int = 2
+    # 6, not 3: three 512-token chunks is often too little for a broad question
+    # ("what problem does this paper address?") to be answerable, and the Tutor
+    # is instructed to refuse rather than guess — so a too-small budget shows up
+    # as spurious refusals, not as vague answers.
+    rag_top_k: int = 6
+    # Calibrated against bge-small-en-v1.5 cosine scores on real papers, not
+    # guessed. Measured on "Attention Is All You Need":
+    #   genuinely relevant questions -> top chunks score 0.65 - 0.77
+    #   off-topic questions          -> top chunks score 0.48 - 0.57
+    # The old default of 0.7 sat *inside* the relevant band, so ordinary
+    # questions ("What problem does this paper address?", "Explain the
+    # methodology") retrieved zero chunks and were wrongly refused. 0.60 lands
+    # in the empty gap: it keeps relevant chunks and still rejects off-topic
+    # ones. Re-measure before changing rag_embedding_model — these numbers are
+    # a property of that model, not a universal constant.
+    rag_similarity_threshold: float = 0.60
     rag_embedding_model: str = "BAAI/bge-small-en-v1.5"
     rag_llm_model: str = "gpt-4o-mini"
     # Grounded QA (services/grounded_qa.py): route chat through the

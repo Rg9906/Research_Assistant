@@ -90,10 +90,17 @@ def build_citations(
         page_num = extract_page_number(meta)
         paper_id = meta.get("paper_id") or (str(default_paper_id) if default_paper_id else None)
 
+        # A None score marks a lead chunk (the paper's intro, included by
+        # position rather than matched by similarity — see get_lead_nodes).
+        # Keep it None instead of flattening to 0.0, which would display as
+        # "0.00 relevance" and read like a bug rather than "always-included
+        # context".
+        raw_score = node_with_score.score
         sources.append({
             "rank": rank,
             "node_id": node.node_id,
-            "score": float(node_with_score.score or 0.0),
+            "score": float(raw_score) if raw_score is not None else None,
+            "is_lead": raw_score is None,
             "text": node.get_content(),
             "page_number": str(page_num) if page_num is not None else "N/A",
             "filename": meta.get("file_name") or meta.get("filename") or (f"{paper_id}.pdf" if paper_id else "unknown.pdf"),
@@ -188,6 +195,45 @@ class PaperSession:
                 )
             except Exception as e:
                 logger.warning("Could not initialize LlamaIndex Reranker: %s", e)
+
+    def get_lead_nodes(self, limit: int) -> List[NodeWithScore]:
+        """Return the paper's opening chunks — title, abstract, introduction.
+
+        Why this exists at all:
+            Vector retrieval finds chunks whose *wording* resembles the query.
+            That works for "what is scaled dot-product attention?" and fails for
+            "what problem does this paper address?", because a paper's problem
+            statement is prose that shares almost no vocabulary with that
+            question. Measured on a real paper, such questions retrieved only
+            mid-document pages and were refused, despite the answer sitting in
+            the abstract.
+
+            A human reading a paper always reads the front matter first. These
+            chunks give the model that same framing on every question, so
+            document-level questions are answerable without an extra LLM call
+            (which HyDE or a query-fusion retriever would cost) and without
+            stuffing the whole paper into the prompt.
+
+        Ordering is by page, then by position within the page, using the same
+        page metadata `extract_page_number` understands. Nodes are returned with
+        no score: they were not retrieved by similarity, and a fake score would
+        corrupt the merge ranking and the citation list.
+        """
+        if limit <= 0:
+            return []
+
+        docs = list(self.index.docstore.docs.values())
+
+        def sort_key(node: Any) -> tuple[int, int]:
+            page = extract_page_number(node.metadata or {})
+            try:
+                page_num = int(page) if page is not None else 10**6
+            except (TypeError, ValueError):
+                page_num = 10**6
+            return (page_num, node.start_char_idx or 0)
+
+        docs.sort(key=sort_key)
+        return [NodeWithScore(node=node, score=None) for node in docs[:limit]]
 
     @property
     def node_postprocessors(self) -> List[Any]:
@@ -494,6 +540,7 @@ class PaperSessionManager:
         query: str,
         similarity_top_k: Optional[int] = None,
         apply_postprocessors: bool = True,
+        include_lead_chunks: Optional[int] = None,
     ) -> List[NodeWithScore]:
         """Retrieve the most relevant nodes across every paper — no generation.
 
@@ -516,6 +563,13 @@ class PaperSessionManager:
         every chunk falls below the threshold and the caller is handed nothing
         to summarize. Callers that disable it are asking for a representative
         sample of the document rather than the answer to a question.
+
+        Every paper's opening chunks (`include_lead_chunks`, default
+        `rag_lead_chunks`) are prepended to the result — see
+        `PaperSession.get_lead_nodes` for why similarity alone cannot answer
+        document-level questions. They are added *after* postprocessing because
+        the similarity cutoff would discard them: they carry no score, having
+        been selected by position rather than by matching the query.
         """
         if not papers:
             raise ValueError("retrieve_across_papers requires at least one paper.")
@@ -533,12 +587,30 @@ class PaperSessionManager:
                 for postprocessor in sessions[0].node_postprocessors:
                     nodes = postprocessor.postprocess_nodes(nodes, query_bundle=QueryBundle(query))
 
+            lead_count = (
+                self.settings.rag_lead_chunks
+                if include_lead_chunks is None
+                else include_lead_chunks
+            )
+            lead_nodes: List[NodeWithScore] = []
+            seen = {n.node.node_id for n in nodes}
+            for session in sessions:
+                for lead in session.get_lead_nodes(lead_count):
+                    if lead.node.node_id not in seen:
+                        seen.add(lead.node.node_id)
+                        lead_nodes.append(lead)
+
+            # Front matter first: the model should know what the paper *is*
+            # before it reads passages pulled out of the middle of it.
+            nodes = lead_nodes + nodes
+
             logger.info(
-                "Retrieved %d nodes across %d paper(s) for query '%s' (filtered=%s)",
+                "Retrieved %d nodes across %d paper(s) for query '%s' (filtered=%s, lead=%d)",
                 len(nodes),
                 len(sessions),
                 query,
                 apply_postprocessors,
+                len(lead_nodes),
             )
             return nodes
         except Exception as e:
