@@ -159,6 +159,15 @@ const PaperSummary: React.FC = () => {
   return (
     <div className="min-h-screen bg-background text-on-background font-body-ui">
       <main className="px-margin-mobile md:px-margin-desktop max-w-max-width mx-auto grid grid-cols-1 lg:grid-cols-12 gap-gutter">
+        {/* Back to the previous page (the Discovery Feed / Library the user came from). */}
+        <button
+          onClick={() => navigate(-1)}
+          className="lg:col-span-12 flex items-center gap-2 w-fit text-on-surface-variant hover:text-primary transition-colors active:scale-95"
+        >
+          <span className="material-symbols-outlined">arrow_back</span>
+          <span className="font-medium text-sm">Back</span>
+        </button>
+
         {/* Left Column: Summary Content */}
         <div className="lg:col-span-8 space-y-8">
 
@@ -175,13 +184,6 @@ const PaperSummary: React.FC = () => {
               </a>
             )}
           </div>
-
-          {processError && (
-            <div className="bg-error-container text-on-error-container rounded-lg p-4 text-sm flex items-center gap-2">
-              <span className="material-symbols-outlined text-sm">error</span>
-              {processError}
-            </div>
-          )}
 
           {/* Tab Selector */}
           <div className="flex gap-2 p-1 bg-surface-container rounded-xl overflow-x-auto scrollbar-hide">
@@ -267,26 +269,61 @@ const PaperSummary: React.FC = () => {
         </aside>
       </main>
 
-      {/* Full Screen Loading Overlay */}
-      {isProcessing && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in">
+      {/* Full-screen overlay for the "prepare paper" step. It stays up for BOTH
+          the in-progress state AND a failure, so a fast failure (e.g. a paywalled
+          or dead PDF link that 403s) no longer flashes and vanishes — the reason
+          stays on screen with a way to retry or dismiss. */}
+      {(isProcessing || processError) && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in p-4">
           <div className="bg-surface-container-lowest p-8 rounded-2xl shadow-2xl border border-outline-variant/30 max-w-sm w-full text-center space-y-6">
-             <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
-                <div className="absolute inset-0 border-4 border-primary/20 rounded-full"></div>
-                <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin"></div>
-                <span className="material-symbols-outlined text-primary text-4xl animate-pulse">auto_awesome</span>
-             </div>
-             <div className="space-y-2">
-                <h3 className="font-h2 text-2xl text-primary font-bold">Preparing Paper...</h3>
-                <p className="text-on-surface-variant font-body-ui h-12 flex items-center justify-center transition-all animate-fade-in text-sm">
-                  {LOADING_MESSAGES[loadingMsgIndex]}
+            {isProcessing ? (
+              <>
+                <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+                  <div className="absolute inset-0 border-4 border-primary/20 rounded-full"></div>
+                  <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin"></div>
+                  <span className="material-symbols-outlined text-primary text-4xl animate-pulse">auto_awesome</span>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="font-h2 text-2xl text-primary font-bold">Preparing Paper...</h3>
+                  <p className="text-on-surface-variant font-body-ui h-12 flex items-center justify-center transition-all animate-fade-in text-sm">
+                    {LOADING_MESSAGES[loadingMsgIndex]}
+                  </p>
+                </div>
+                <div className="flex justify-center gap-1.5 mt-4">
+                  {LOADING_MESSAGES.map((_, i) => (
+                    <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${i === loadingMsgIndex ? 'w-4 bg-primary' : (i < loadingMsgIndex ? 'w-1.5 bg-primary/50' : 'w-1.5 bg-outline-variant')}`}></div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-on-surface-variant/70">
+                  Indexing the full PDF can take a little while on the first run.
                 </p>
-             </div>
-             <div className="flex justify-center gap-1.5 mt-4">
-                {LOADING_MESSAGES.map((_, i) => (
-                  <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${i === loadingMsgIndex ? 'w-4 bg-primary' : (i < loadingMsgIndex ? 'w-1.5 bg-primary/50' : 'w-1.5 bg-outline-variant')}`}></div>
-                ))}
-             </div>
+              </>
+            ) : (
+              <>
+                <div className="relative w-20 h-20 mx-auto flex items-center justify-center">
+                  <div className="absolute inset-0 border-4 border-error/20 rounded-full"></div>
+                  <span className="material-symbols-outlined text-error text-4xl">error</span>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="font-h2 text-2xl text-error font-bold">Couldn't prepare this paper</h3>
+                  <p className="text-on-surface-variant text-sm leading-relaxed">{processError}</p>
+                </div>
+                <div className="flex gap-3 justify-center pt-1">
+                  <button
+                    onClick={() => setProcessError(null)}
+                    className="px-5 py-2.5 rounded-lg border border-outline-variant text-on-surface-variant text-sm font-medium hover:bg-surface-container transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    onClick={handleProcessPaper}
+                    className="px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-bold hover:opacity-90 active:scale-95 transition-all"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

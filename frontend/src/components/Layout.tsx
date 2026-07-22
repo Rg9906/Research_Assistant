@@ -1,10 +1,14 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAgentActivity } from '../context/AgentActivityContext';
+import { RETURN_HOME_EVENT } from '../App';
 
 const Layout: React.FC = () => {
   const location = useLocation();
   const { isActive, label } = useAgentActivity();
+
+  // Return to the landing / splash page (handled in App, which replays the intro).
+  const returnToLanding = () => window.dispatchEvent(new Event(RETURN_HOME_EVENT));
 
   return (
     <>
@@ -24,6 +28,14 @@ const Layout: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center text-primary font-bold overflow-hidden border border-outline-variant">
               PA
             </div>
+            <button
+              onClick={returnToLanding}
+              title="Log out — return to the landing page"
+              aria-label="Log out and return to the landing page"
+              className="flex items-center justify-center w-9 h-9 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors active:scale-90"
+            >
+              <span className="material-symbols-outlined text-xl">logout</span>
+            </button>
           </div>
         </div>
       </nav>
