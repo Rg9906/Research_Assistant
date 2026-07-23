@@ -28,6 +28,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 # Anchor the .env lookup to the repository root rather than the process CWD.
@@ -183,6 +184,22 @@ class Settings(BaseSettings):
     search_weight_recency: float = 0.15
     search_weight_availability: float = 0.25
     search_decay_rate: float = 0.05
+
+    # -- Conversation memory (WorkspaceChatStore, app/utils.py) --
+    # Bounds how many messages (user+assistant, ~2 per turn) are persisted and
+    # returned per workspace. This bounds storage/display growth only — the
+    # per-call LLM context window is already bounded separately by
+    # grounded_qa._CONDENSE_HISTORY_TURNS, which only looks at the last few
+    # turns regardless of how much history is stored.
+    memory_max_messages: int = 50
+
+    # -- Multi-paper comparison (agent/comparison.py, services/comparison.py) --
+    # The fixed catalogue offered by GET /api/comparison-axes, mirroring how
+    # GET /api/summary-levels lets the frontend render server-defined options
+    # instead of hardcoding them. A user can still type a free-text axis.
+    comparison_default_axes: list[str] = Field(
+        default_factory=lambda: ["methodology", "results", "limitations"]
+    )
 
     model_config = {
         # Read the repo-root .env, then any .env in the current working

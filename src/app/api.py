@@ -39,10 +39,12 @@ from app.utils import (
     get_paper_session_manager,
     get_workspace_chat_store,
     get_embedding_engine,
+    get_optional_comparison_service,
     get_optional_grounded_qa_service,
     get_summarizer_service,
     WorkspaceChatStore,
 )
+from paperpilot.services.comparison import ComparisonService
 from paperpilot.services.grounded_qa import GroundedQAService
 from paperpilot.services.summarizer import SUMMARY_LEVELS, SummarizerService
 from paperpilot.core.models import PaperMetadata
@@ -122,6 +124,10 @@ class ChatMessage(BaseModel):
     # Explanation level, forwarded to both the tutor and the critic (which
     # audits whether the answer actually matched the level asked for).
     difficulty: str = "graduate/expert"
+    # None (default) scopes the question to every paper in the workspace, as
+    # before. Set this to narrow a question to a subset of papers the user has
+    # selected, without needing a separate workspace per subset.
+    paper_ids: Optional[List[UUID]] = None
 
 class Citation(BaseModel):
     rank: int
@@ -139,6 +145,34 @@ class ChatResponse(BaseModel):
     # Citations and the audit verdict are part of the response contract, not
     # debug extras: the product promise is answers traceable to the source, so
     # the UI needs the evidence and the flag for "this failed review".
+    citations: List[Citation] = []
+    approved: bool = True
+    refused: bool = False
+    attempts: int = 1
+    critique: Optional[str] = None
+
+class ChatHistoryMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatHistoryResponse(BaseModel):
+    messages: List[ChatHistoryMessage] = []
+
+class CompareRequest(BaseModel):
+    axis: str
+    # None (default) compares every paper in the workspace. Set this to
+    # restrict the comparison to a user-selected subset.
+    paper_ids: Optional[List[UUID]] = None
+    difficulty: str = "graduate/expert"
+
+class ComparisonSection(BaseModel):
+    paper_id: str
+    title: str
+    summary: str
+
+class CompareResponse(BaseModel):
+    synthesis: str
+    sections: List[ComparisonSection] = []
     citations: List[Citation] = []
     approved: bool = True
     refused: bool = False
@@ -197,7 +231,7 @@ def delete_workspace(
     chat_store: WorkspaceChatStore = Depends(get_workspace_chat_store),
 ):
     db.delete_workspace(workspace_id)
-    chat_store.set(workspace_id, [])
+    chat_store.clear(workspace_id)
     return {"status": "success"}
 
 @app.get("/api/workspaces/{workspace_id}/papers", response_model=List[Any])
@@ -227,6 +261,12 @@ def chat_with_workspace(
     papers = db.get_workspace_papers(workspace_id)
     if not papers:
         raise HTTPException(status_code=400, detail="Workspace is empty. Add papers first.")
+
+    if message.paper_ids:
+        wanted = {str(pid) for pid in message.paper_ids}
+        papers = [p for p in papers if str(p.paper_id) in wanted]
+        if not papers:
+            raise HTTPException(status_code=400, detail="None of the selected papers belong to this workspace.")
 
     titles = ", ".join(p.title for p in papers)
     try:
@@ -265,6 +305,81 @@ def chat_with_workspace(
         raise _fail(502, f"Chat failed for workspace papers [{titles}]: {e}", e)
     except Exception as e:
         raise _fail(500, f"Unexpected error during chat for workspace papers [{titles}]", e)
+
+@app.get("/api/workspaces/{workspace_id}/chat/history", response_model=ChatHistoryResponse)
+def get_chat_history(
+    workspace_id: UUID,
+    chat_store: WorkspaceChatStore = Depends(get_workspace_chat_store),
+):
+    """The workspace's stored conversation, so the frontend can restore it on mount.
+
+    Citations aren't persisted per historical turn, only role/content — a
+    restored message shows its text but not its evidence; new turns still
+    return full citations as before.
+    """
+    history = chat_store.get(workspace_id)
+    return ChatHistoryResponse(
+        messages=[ChatHistoryMessage(role=m.role.value, content=str(m.content)) for m in history]
+    )
+
+@app.delete("/api/workspaces/{workspace_id}/chat/history")
+def clear_chat_history(
+    workspace_id: UUID,
+    chat_store: WorkspaceChatStore = Depends(get_workspace_chat_store),
+):
+    """Start a fresh conversation for this workspace without deleting it."""
+    chat_store.clear(workspace_id)
+    return {"status": "success"}
+
+@app.get("/api/comparison-axes")
+def list_comparison_axes():
+    """The catalogue of quick-pick comparison axes, defined server-side.
+
+    Mirrors GET /api/summary-levels: the frontend renders whatever this
+    returns instead of hardcoding axis names. A user can still submit a
+    free-text axis via POST /compare.
+    """
+    return {"axes": _get_settings().comparison_default_axes}
+
+@app.post("/api/workspaces/{workspace_id}/compare", response_model=CompareResponse)
+def compare_workspace_papers(
+    workspace_id: UUID,
+    request: CompareRequest,
+    db: WorkspaceManager = Depends(get_db_manager),
+    chat_store: WorkspaceChatStore = Depends(get_workspace_chat_store),
+    comparison_service: Optional[ComparisonService] = Depends(get_optional_comparison_service),
+):
+    papers = db.get_workspace_papers(workspace_id)
+    if request.paper_ids:
+        wanted = {str(pid) for pid in request.paper_ids}
+        papers = [p for p in papers if str(p.paper_id) in wanted]
+
+    if len(papers) < 2:
+        raise HTTPException(status_code=400, detail="Select at least two papers in this workspace to compare.")
+
+    if comparison_service is None:
+        raise HTTPException(status_code=503, detail="Comparison is unavailable: no LLM provider is configured.")
+
+    titles = ", ".join(p.title for p in papers)
+    try:
+        history = chat_store.get(workspace_id)
+        result = comparison_service.compare(
+            papers, request.axis, chat_history=history, difficulty=request.difficulty
+        )
+        chat_store.set(workspace_id, result.chat_history)
+        return CompareResponse(
+            synthesis=result.synthesis,
+            sections=[ComparisonSection(**s) for s in result.sections],
+            citations=[Citation(**{k: c[k] for k in Citation.model_fields}) for c in result.citations],
+            approved=result.approved,
+            refused=result.refused,
+            attempts=result.attempts,
+            critique=result.critique.feedback if result.critique else None,
+        )
+    except PaperChatException as e:
+        raise _fail(502, f"Comparison failed for workspace papers [{titles}]: {e}", e)
+    except Exception as e:
+        raise _fail(500, f"Unexpected error comparing workspace papers [{titles}]", e)
 
 @app.get("/api/summary-levels")
 def list_summary_levels():

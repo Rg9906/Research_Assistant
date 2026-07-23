@@ -30,15 +30,16 @@ harder.
 | `src/paperpilot/document/downloader.py` | `PDFDownloader` — fetch, validate (magic bytes + PyMuPDF open), retry with backoff, scheme allowlist (http/https by default), and a streamed size cap. |
 | `src/paperpilot/retrieval/embedder.py` | `EmbeddingEngine` wrapping `sentence-transformers` (MiniLM). Used only by the ranker (see §4). |
 | `src/paperpilot/search/` | `providers.py` (arXiv, Semantic Scholar via a `SearchProvider` Protocol), `ranker.py` (weighted scoring), `agent.py` (`SearchAgent`: fetch → dedupe → rank). Solid, well-tested. |
-| `src/paperpilot/agent/` | `planner.py`, `tutor.py`, `critic.py` — LangChain `BaseChatModel`-based agents implementing the grounded-QA + self-critique contract, plus `formatting.py` (shared `clean_json_markdown` / `format_chunks_as_context` helpers used by all three). See §4 for their current (disconnected) status. |
+| `src/paperpilot/agent/` | `planner.py`, `tutor.py`, `critic.py`, `comparison.py` — LangChain `BaseChatModel`-based agents implementing the grounded-QA + self-critique contract, plus `formatting.py` (shared `clean_json_markdown` / `format_chunks_as_context` / `format_chunks_grouped_by_paper` helpers used across all four). See §4 for planner's current (disconnected) status; Tutor, Critic, and Comparison are all live. |
 | `src/paperpilot/graph/` | `state.py` (`AgentState` TypedDict), `nodes.py` (`AgentNodes`), `builder.py` (LangGraph `StateGraph` + routers). Compiles a planner→search→retrieve→tutor→critic loop. Not wired to the API — see §4. |
-| `src/paperpilot/services/grounded_qa.py` | **The production QA path.** `GroundedQAService` joins the two stacks: retrieval via `PaperSessionManager.retrieve_across_papers` (Stack B) → `TutorAgent` → `CriticAgent` → bounded retry (Stack A). `nodes_to_chunks` is the single LlamaIndex→`TextChunk` translation point. See §4. |
+| `src/paperpilot/services/grounded_qa.py` | **The production QA path.** `GroundedQAService` joins the two stacks: retrieval via `PaperSessionManager.retrieve_across_papers` (Stack B) → `TutorAgent` → `CriticAgent` → bounded retry (Stack A). `nodes_to_chunks` is the single LlamaIndex→`TextChunk` translation point; `append_chat_turn` is the single "extend history with a turn" helper, shared with `services/comparison.py`. See §4. |
+| `src/paperpilot/services/comparison.py` | `ComparisonService` — the same join pattern as `grounded_qa.py`, but retrieves **per paper** (not merged-by-score) and generates via `ComparisonAgent` instead of `TutorAgent`. See §4. |
 | `src/paperpilot/services/summarizer.py` | `SummarizerService` + `SUMMARY_LEVELS` — the ten summary views from `ProjectIdea.txt`, generated through `GroundedQAService` (so summaries are audited too) and cached on disk per paper+level at `storage/papers/paper_<id>/summaries.json`. Also owns **background prefetching**: `prefetch()` generates every uncached level ahead of the user on a bounded `ThreadPoolExecutor` (`rag_prefetch_workers`, default 2) in `PREFETCH_PRIORITY` order; a per-`(paper, level)` lock means a prefetch and an on-demand click for the same level share one LLM call, and a per-paper file lock makes the parallel cache writes atomic. `status()`/`pending_levels()` back the polling endpoint. |
 | `src/paperpilot/services/paper_chat/` | **The document-intelligence stack.** `session.py` (`PaperSession`, `PaperSessionManager`, `MultiPaperRetriever`) owns LlamaIndex document loading, chunking, indexing, persistence, single- and multi-paper chat. `exceptions.py` holds the domain exception hierarchy. |
-| `src/paperpilot/workspace/manager.py` | `WorkspaceManager` — SQLite (`data/workspace.db`) for workspaces, papers, workspace↔paper mapping, and a legacy `text_chunks` table (vestigial — populated with `chunks=[]` everywhere now that LlamaIndex owns chunk storage on disk). `_get_connection()` is a contextmanager that always closes the connection. |
+| `src/paperpilot/workspace/manager.py` | `WorkspaceManager` — SQLite (`data/workspace.db`) for workspaces, papers, workspace↔paper mapping, a `chat_messages` table (persists `WorkspaceChatStore`'s conversation memory, `ON DELETE CASCADE` from `workspaces`), and a legacy `text_chunks` table (vestigial — populated with `chunks=[]` everywhere now that LlamaIndex owns chunk storage on disk). `_get_connection()` is a contextmanager that always closes the connection. |
 | `src/paperpilot/pipeline.py` | `DocumentPipeline` — facade over `PaperSessionManager` + `WorkspaceManager`, used by the LangGraph nodes and by metadata sync (`sync_paper_metadata` now calls the public `WorkspaceManager.get_paper_by_id`). |
 | `src/app/` | FastAPI backend (`api.py`, `utils.py`). **Not an installed package** — no `__init__.py`. Run from `src/` so `app` resolves as a namespace package, e.g. `uvicorn app.api:app --reload` from inside `src/`. `templates.html` is a static design mockup, never served. |
-| `frontend/` | React 19 + Vite + TypeScript + Tailwind (Material-3-style token palette). Routes: `/` (DiscoveryFeed — search), `/library` (ResearchLibrary — workspaces, click-through to detail), `/paper/:paperId` (PaperSummary — abstract + tabbed AI views + chat), `/workspace/:workspaceId` (WorkspaceDetail — multi-paper workspace chat). `src/context/AgentActivityContext.tsx` provides real in-flight-request status to the navbar. `src/context/ThemeContext.tsx` provides light/dark mode: the whole token palette lives as CSS custom properties in `src/index.css` (`:root` = light, `.dark` overrides), and `tailwind.config.js` colors resolve through `rgb(var(--color-x) / <alpha-value>)` so a single `.dark` class on `<html>`, toggled from `Layout.tsx`'s navbar button, re-themes every token-based component at once. Preference persists to `localStorage` (`pp_theme`); `frontend/index.html` has an inline pre-hydration script that applies the stored class before first paint to avoid a light-mode flash. The landing/splash screen (`components/splash/`) has its own hardcoded styling and is intentionally unaffected by the toggle. `src/api/client.ts` is the single fetch layer; base URL is hardcoded to `http://localhost:8000/api`. |
+| `frontend/` | React 19 + Vite + TypeScript + Tailwind (Material-3-style token palette). Routes: `/` (DiscoveryFeed — search), `/library` (ResearchLibrary — workspaces, click-through to detail), `/paper/:paperId` (PaperSummary — abstract + tabbed AI views + chat), `/workspace/:workspaceId` (WorkspaceDetail — multi-paper workspace chat, paper multi-select + compare, and chat-history restore/clear). `src/context/AgentActivityContext.tsx` provides real in-flight-request status to the navbar. `src/context/ThemeContext.tsx` provides light/dark mode: the whole token palette lives as CSS custom properties in `src/index.css` (`:root` = light, `.dark` overrides), and `tailwind.config.js` colors resolve through `rgb(var(--color-x) / <alpha-value>)` so a single `.dark` class on `<html>`, toggled from `Layout.tsx`'s navbar button, re-themes every token-based component at once. Preference persists to `localStorage` (`pp_theme`); `frontend/index.html` has an inline pre-hydration script that applies the stored class before first paint to avoid a light-mode flash. The landing/splash screen (`components/splash/`) has its own hardcoded styling and is intentionally unaffected by the toggle. `src/api/client.ts` is the single fetch layer; base URL is hardcoded to `http://localhost:8000/api`. |
 | `tests/` | pytest suite, `pythonpath=src` (see `pyproject.toml`), fully offline — external calls are mocked/stubbed. `tests/test_tutor.py::StubChatModel` is reused across planner/critic/graph tests; keep that pattern. |
 | `data/` | Runtime SQLite DB + legacy FAISS indexes. Gitignored. |
 | `storage/papers/paper_<uuid>/{index,cache}` | Per-paper LlamaIndex persistence directory (docstore + fingerprint.json). Gitignored. |
@@ -61,7 +62,7 @@ React (PaperSummary) --POST /api/papers/process--> FastAPI
   --> only on success: WorkspaceManager.create_workspace + add_paper_to_workspace
 
 React (chat: PaperSummary or WorkspaceDetail) --POST /api/workspaces/{id}/chat--> FastAPI
-  --> WorkspaceManager.get_workspace_papers(id)   # ALL papers in the workspace
+  --> WorkspaceManager.get_workspace_papers(id)   # ALL papers, or a subset if paper_ids is sent
   --> [grounded path, default] GroundedQAService.answer(papers, query, history, difficulty)
         --> condense follow-up into a standalone retrieval query (if history)
         --> retrieve_across_papers -> MultiPaperRetriever + similarity cutoff
@@ -69,7 +70,18 @@ React (chat: PaperSummary or WorkspaceDetail) --POST /api/workspaces/{id}/chat--
         --> returns answer + citations + approved/refused/attempts
   --> [fallback] PaperSessionManager.chat_across_papers(...)  # LlamaIndex chat engine
   --> WorkspaceChatStore (app/utils.py) persists the returned chat_history,
-      scoped per workspace_id — NOT baked into the shared PaperSession
+      scoped per workspace_id, write-through to WorkspaceManager's chat_messages
+      table (survives a restart) — NOT baked into the shared PaperSession
+
+React (WorkspaceDetail, on mount) --GET /api/workspaces/{id}/chat/history--> restores
+  prior messages from the same store; --DELETE .../chat/history--> starts a fresh one
+
+React (WorkspaceDetail, 2+ papers selected) --POST /api/workspaces/{id}/compare--> FastAPI
+  --> ComparisonService.compare(papers, axis, history, difficulty)
+        --> retrieve_across_papers PER PAPER (not merged) -> ComparisonAgent
+        --> CriticAgent audits the flattened synthesis -> retry on rejection
+        --> returns per-paper sections + synthesis + citations + approved/refused/attempts
+  --> the turn is appended to the same WorkspaceChatStore history as chat
 
 React (PaperSummary tabs) --GET /api/summary-levels--> the 10 level definitions
   --POST /api/papers/{paper_id}/summary/{level_id}[?regenerate=true]--> FastAPI
@@ -123,6 +135,29 @@ intelligence; the agents own generation and verification. Do not build a third
 RAG implementation, and do not add a second retriever — extend
 `retrieve_across_papers`/`MultiPaperRetriever` instead.
 
+**Comparison joins the same two stacks a second way.**
+`services/comparison.py::ComparisonService` (`POST /api/workspaces/{id}/compare`)
+retrieves via `retrieve_across_papers` **called once per paper** rather than
+merged-by-score (a comparison claim must be attributable to a specific paper,
+unlike chat), passes the per-paper `TextChunk`s to a new Stack A agent
+(`agent/comparison.py::ComparisonAgent`, producing a structured per-paper
+breakdown + synthesis), and audits the flattened result with the same
+`CriticAgent` chat uses — no second critic, no second retriever. A comparison
+turn is appended to the workspace's `chat_history` via
+`grounded_qa.append_chat_turn` (promoted out of `GroundedQAService` so both
+services share it), so a follow-up question can reference "the comparison
+above."
+
+**Conversation memory is now workspace-DB-backed, not process-only.**
+`WorkspaceChatStore` (`app/utils.py`) still exposes the same `get`/`set`
+contract, but `set()` now writes through to a `chat_messages` table
+(`WorkspaceManager`), so a workspace's conversation survives a server restart;
+the in-memory dict is now just a read cache in front of it.
+`memory_max_messages` (default 50) bounds how much is kept per workspace, independent
+of `_CONDENSE_HISTORY_TURNS` (which bounds only the per-call condense-prompt
+window). `GET`/`DELETE /api/workspaces/{id}/chat/history` let the frontend
+restore a conversation on mount and start a fresh one on demand.
+
 ## 5. Configuration (`src/paperpilot/config.py`)
 
 `Settings` (pydantic-settings, `.env`-backed) — key groups:
@@ -149,6 +184,13 @@ RAG implementation, and do not add a second retriever — extend
   even when correctly paced, so both halves are load-bearing.
 - Summaries: `rag_summary_top_k` (10). Summaries retrieve more widely than chat
   and with the similarity cutoff **disabled** — see §7 for why.
+- Conversation memory: `memory_max_messages` (50) bounds how many messages
+  `WorkspaceChatStore` keeps/persists per workspace — independent of
+  `_CONDENSE_HISTORY_TURNS` in `grounded_qa.py`, which bounds only the
+  per-call condense-prompt window regardless of how much is stored.
+- Comparison: `comparison_default_axes` (`["methodology", "results",
+  "limitations"]`) — the quick-pick catalogue `GET /api/comparison-axes`
+  returns; a free-text axis is always also accepted by `POST /compare`.
 - Search ranking weights: `search_weight_similarity/citations/recency/availability`
   (auto-normalized to sum to 1 in `PaperRanker.__init__` if they don't),
   `search_decay_rate`. **Availability** (`search/availability.py`) grades how
@@ -198,10 +240,12 @@ consolidate this if you're deliberately redesigning ranking.
 - **`lru_cache` singletons** for expensive, stateless-enough services
   (`get_settings`, `get_db_manager`, `get_embedding_engine`,
   `get_paper_session_manager`, `get_search_agent`, `get_workspace_chat_store`
-  in `app/utils.py`). The one thing that must **not** be a bare singleton is
-  per-conversation chat memory — see `WorkspaceChatStore` and
-  `PaperSession._build_chat_engine` for why memory is scoped by workspace_id
-  and built fresh per call rather than cached on the session.
+  in `app/utils.py`). The one thing that must **not** be a bare in-memory
+  singleton is per-conversation chat memory — see `WorkspaceChatStore` (now a
+  write-through cache over `WorkspaceManager`'s `chat_messages` table, scoped
+  by workspace_id) and `PaperSession._build_chat_engine` for why memory is
+  scoped by workspace_id and built fresh per call rather than cached on the
+  session.
 - **Logging**: module-level `logger = logging.getLogger(__name__)`, lazy `%s`
   formatting, info for lifecycle events, warning for recoverable failures
   (e.g. a search provider failing shouldn't crash the whole search).
@@ -370,10 +414,12 @@ These were all invisible to the offline suite — every one needed a real call.
 | Planner agent / LangGraph pipeline | Implemented and tested, still not invoked by any endpoint — the remaining inert piece (§11) |
 | Metadata sync from arXiv/Semantic Scholar | Implemented (`pipeline.py::sync_paper_metadata`) |
 | Multi-level summarization | Done — `SummarizerService` owns all 10 levels from the vision doc, generates them through the grounded path, and caches per paper+level on disk. Tabs are driven by `GET /api/summary-levels`, with an explicit Regenerate action. |
-| Multi-paper comparison, learning roadmaps, quizzes, long-term memory | Not started |
+| Multi-paper comparison | Done — `ComparisonAgent`/`ComparisonService` retrieve per paper via `retrieve_across_papers`, generate a structured per-paper breakdown + synthesis, and audit it with the same `CriticAgent` chat uses. Exposed via `POST /api/workspaces/{id}/compare`; `WorkspaceDetail` lets the user select 2+ papers and pick an axis. |
+| Persistent conversation memory | Done — `WorkspaceChatStore` (`app/utils.py`) now writes through to a `chat_messages` table (`WorkspaceManager`), so a workspace's conversation survives a server restart, not just the process's lifetime. `GET/DELETE /api/workspaces/{id}/chat/history` let the frontend restore or clear it; `memory_max_messages` bounds how much is kept. |
+| Learning roadmaps, quizzes | Not started |
 | Structured citations | Done — every chat answer returns citations (page, filename, score, excerpt); `AnswerMessage.tsx` renders them collapsibly in both chat surfaces |
 | Streaming responses | `PaperSession.stream()` exists but no endpoint exposes it |
-| Workspace browsing UI | `WorkspaceDetail` page (`/workspace/:workspaceId`) lists papers and lets you chat with the whole workspace; `ResearchLibrary` cards now navigate there |
+| Workspace browsing UI | `WorkspaceDetail` page (`/workspace/:workspaceId`) lists papers, restores prior conversation on open, lets you chat with the whole workspace or a selected subset, and compare 2+ selected papers; `ResearchLibrary` cards navigate there |
 | Live agent-activity status | Navbar reflects real in-flight requests via `AgentActivityContext`, not a hardcoded string |
 | Light/dark theme | Done — `ThemeContext` toggles a `.dark` class on `<html>`; the Material-3 palette is CSS-variable-driven (`index.css`) so every token-based component re-themes at once; preference persists to `localStorage` and is applied pre-paint to avoid a flash |
 
@@ -404,7 +450,7 @@ These were all invisible to the offline suite — every one needed a real call.
   test.
 - New endpoints/features need at least one offline test following the
   existing per-module test file convention (`tests/test_<module>.py`).
-- Current offline suite: 173 tests pass fully offline (182 collected total;
+- Current offline suite: 212 tests pass fully offline (221 collected total;
   the 9 in `tests/test_embedder.py` need network, see below). `tests/test_api.py` uses
   FastAPI `dependency_overrides` + `TestClient` (deliberately *not* as a context
   manager, so the model-warming lifespan is skipped) — follow that pattern for
@@ -425,9 +471,8 @@ These were all invisible to the offline suite — every one needed a real call.
    3 LLM round-trips), rate limiting, auth if this ever leaves localhost.
 2. Wire the Planner agent in: decompose a user goal into subtasks and drive
    search + retrieval from it. This is the last inert part of Stack A.
-3. Remaining vision features: multi-paper comparison (a Comparison agent over
-   `retrieve_across_papers`), learning roadmaps, quizzes, and persistent
-   long-term memory (`WorkspaceChatStore` is still process-local).
+3. Remaining vision features: learning roadmaps and quizzes. (Multi-paper
+   comparison and persistent conversation memory are done — §4, §8.)
 4. Expose streaming (`PaperSession.stream()`) so long grounded answers render
    progressively — currently a critic retry means a long silent wait.
 

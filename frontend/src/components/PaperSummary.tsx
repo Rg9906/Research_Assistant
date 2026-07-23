@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   processPaper,
   chatWithWorkspace,
+  fetchChatHistory,
   fetchSummaryLevels,
   summarizePaper,
   prefetchSummaries,
@@ -239,11 +240,29 @@ const PaperSummary: React.FC = () => {
 
   const openChat = () => {
     setChatOpen(true);
-    setMessages(prev =>
-      prev.length
-        ? prev
-        : [{ role: 'agent', content: `Hello! I've read "${paper.title}". What would you like to know about it?` }],
-    );
+    if (messages.length) return;
+
+    const greeting: AgentMessage = {
+      role: 'agent',
+      content: `Hello! I've read "${paper.title}". What would you like to know about it?`,
+    };
+    setMessages([greeting]);
+
+    // Restore any conversation the backend already remembers for this paper's
+    // workspace (persists across reloads/navigation, not just this mount).
+    if (workspaceId) {
+      fetchChatHistory(workspaceId)
+        .then((history) => {
+          if (!history.length) return;
+          setMessages(
+            history.map((entry) => ({
+              role: entry.role === 'user' ? 'user' : 'agent',
+              content: entry.content,
+            })),
+          );
+        })
+        .catch((err) => console.error('Could not restore chat history', err));
+    }
   };
 
   const handleProcessPaper = async () => {

@@ -111,6 +111,24 @@ class WorkspaceManager:
                 );
                 """
             )
+
+            # 5. Chat Messages Table — persists WorkspaceChatStore's conversation
+            # memory (app/utils.py) so it survives a server restart, not just
+            # the lifetime of the process. ON DELETE CASCADE means deleting a
+            # workspace also deletes its conversation with no extra code.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    workspace_id TEXT NOT NULL,
+                    turn_index INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (workspace_id, turn_index),
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id) ON DELETE CASCADE
+                );
+                """
+            )
             conn.commit()
             logger.info("Workspace database tables initialized successfully.")
 
@@ -377,3 +395,54 @@ class WorkspaceManager:
             )
             conn.commit()
             logger.info("Updated paper metadata in database for: '%s'", paper.title)
+
+    def get_chat_messages(self, workspace_id: UUID) -> list[dict[str, str]]:
+        """Retrieve a workspace's conversation history, oldest turn first.
+
+        Returns:
+            List of {'role': str, 'content': str} dicts ordered by turn_index.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT role, content FROM chat_messages
+                WHERE workspace_id = ?
+                ORDER BY turn_index ASC;
+                """,
+                (str(workspace_id),),
+            )
+            return [{"role": row["role"], "content": row["content"]} for row in cursor.fetchall()]
+
+    def replace_chat_messages(self, workspace_id: UUID, messages: list[tuple[str, str]]) -> None:
+        """Overwrite a workspace's stored conversation with `messages`.
+
+        Matches WorkspaceChatStore's existing "whole-history replace" contract
+        (get the full history, hand it to a service, write back whatever comes
+        out) rather than an append-only log, so no caller above this needed to
+        change when memory moved from an in-memory dict to this table.
+
+        Args:
+            workspace_id: The workspace UUID.
+            messages: Ordered (role, content) pairs, oldest first.
+        """
+        created_at = datetime.now().isoformat()
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM chat_messages WHERE workspace_id = ?;", (str(workspace_id),))
+            conn.executemany(
+                """
+                INSERT INTO chat_messages (workspace_id, turn_index, role, content, created_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                [
+                    (str(workspace_id), index, role, content, created_at)
+                    for index, (role, content) in enumerate(messages)
+                ],
+            )
+            conn.commit()
+
+    def clear_chat_messages(self, workspace_id: UUID) -> None:
+        """Delete a workspace's stored conversation without deleting the workspace."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM chat_messages WHERE workspace_id = ?;", (str(workspace_id),))
+            conn.commit()
+            logger.info("Cleared chat history for workspace %s", workspace_id)

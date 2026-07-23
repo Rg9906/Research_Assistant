@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { Citation } from '../api/client';
+import type { Citation, ComparisonSection } from '../api/client';
 
 export interface AgentMessage {
   role: 'user' | 'agent';
@@ -7,6 +7,9 @@ export interface AgentMessage {
   citations?: Citation[];
   approved?: boolean;
   refused?: boolean;
+  // Present only for a multi-paper comparison turn — when set, the per-paper
+  // breakdown renders above `content` (which carries the synthesis text).
+  sections?: ComparisonSection[];
 }
 
 /**
@@ -35,9 +38,27 @@ const AnswerMessage: React.FC<{ message: AgentMessage }> = ({ message }) => {
     );
   }
 
+  const sections = message.sections ?? [];
+
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] space-y-2">
+        {sections.length > 0 && (
+          <div className="space-y-2">
+            {sections.map((section) => (
+              <div
+                key={section.paper_id}
+                className="bg-surface-container rounded-lg border border-outline-variant/20 p-2.5 space-y-1"
+              >
+                <span className="inline-block bg-primary-container/20 text-primary-container text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider font-label-caps">
+                  {section.title}
+                </span>
+                <p className="text-xs text-on-surface-variant leading-relaxed">{section.summary}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="p-3 rounded-lg text-sm bg-surface-container text-on-surface rounded-tl-none border border-outline-variant/20 whitespace-pre-wrap">
           {message.content}
         </div>

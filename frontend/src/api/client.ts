@@ -82,13 +82,76 @@ export const chatWithWorkspace = async (
   workspaceId: string,
   query: string,
   difficulty: string = 'graduate/expert',
+  paperIds?: string[],
 ): Promise<ChatAnswer> => {
   const res = await fetch(`${API_BASE_URL}/workspaces/${workspaceId}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, difficulty }),
+    body: JSON.stringify({ query, difficulty, paper_ids: paperIds && paperIds.length ? paperIds : undefined }),
   });
   if (!res.ok) throw new Error('Failed to chat');
+  return res.json();
+};
+
+export interface ChatHistoryEntry {
+  role: string;
+  content: string;
+}
+
+/** Restore a workspace's stored conversation (text only — historical turns don't carry citations). */
+export const fetchChatHistory = async (workspaceId: string): Promise<ChatHistoryEntry[]> => {
+  const res = await fetch(`${API_BASE_URL}/workspaces/${workspaceId}/chat/history`);
+  if (!res.ok) throw new Error('Failed to fetch chat history');
+  const data = await res.json();
+  return data.messages;
+};
+
+/** Start a fresh conversation for this workspace without deleting it. */
+export const clearChatHistory = async (workspaceId: string): Promise<void> => {
+  const res = await fetch(`${API_BASE_URL}/workspaces/${workspaceId}/chat/history`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to clear chat history');
+};
+
+/** The server-defined catalogue of quick-pick comparison axes (a free-text axis is also allowed). */
+export const fetchComparisonAxes = async (): Promise<string[]> => {
+  const res = await fetch(`${API_BASE_URL}/comparison-axes`);
+  if (!res.ok) throw new Error('Failed to fetch comparison axes');
+  const data = await res.json();
+  return data.axes;
+};
+
+export interface ComparisonSection {
+  paper_id: string;
+  title: string;
+  summary: string;
+}
+
+/** The result of comparing 2+ papers along one axis, audited the same way a chat answer is. */
+export interface CompareAnswer {
+  synthesis: string;
+  sections: ComparisonSection[];
+  citations: Citation[];
+  approved: boolean;
+  refused: boolean;
+  attempts: number;
+  critique: string | null;
+}
+
+export const compareWorkspacePapers = async (
+  workspaceId: string,
+  axis: string,
+  paperIds?: string[],
+  difficulty: string = 'graduate/expert',
+): Promise<CompareAnswer> => {
+  const res = await fetch(`${API_BASE_URL}/workspaces/${workspaceId}/compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ axis, difficulty, paper_ids: paperIds && paperIds.length ? paperIds : undefined }),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || 'Failed to compare papers');
+  }
   return res.json();
 };
 

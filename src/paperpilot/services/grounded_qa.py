@@ -86,6 +86,20 @@ class GroundedAnswer(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
+def append_chat_turn(history: List[ChatMessage], user_text: str, assistant_text: str) -> List[ChatMessage]:
+    """Return history extended with one user/assistant turn.
+
+    Uses LlamaIndex `ChatMessage` so the same WorkspaceChatStore can hold
+    history for grounded QA, the plain LlamaIndex chat path, and comparison
+    turns (services/comparison.py) — a workspace's conversation is one stream
+    regardless of which service produced a given turn.
+    """
+    return history + [
+        ChatMessage(role="user", content=user_text),
+        ChatMessage(role="assistant", content=assistant_text),
+    ]
+
+
 def nodes_to_chunks(nodes: List[NodeWithScore]) -> List[TextChunk]:
     """Adapt LlamaIndex retrieval output to the project's TextChunk contract.
 
@@ -354,13 +368,5 @@ class GroundedQAService:
 
     @staticmethod
     def _append_turn(history: List[ChatMessage], question: str, answer: str) -> List[ChatMessage]:
-        """Return history extended with this turn.
-
-        Uses LlamaIndex `ChatMessage` so the same WorkspaceChatStore can hold
-        history for both this path and the default LlamaIndex chat path — a
-        workspace can switch between them without its memory becoming unreadable.
-        """
-        return history + [
-            ChatMessage(role="user", content=question),
-            ChatMessage(role="assistant", content=answer),
-        ]
+        """Return history extended with this turn. See `append_chat_turn`."""
+        return append_chat_turn(history, question, answer)

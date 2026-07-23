@@ -22,16 +22,19 @@ from app.api import app  # noqa: E402
 from app.utils import (  # noqa: E402
     WorkspaceChatStore,
     get_db_manager,
+    get_optional_comparison_service,
     get_optional_grounded_qa_service,
     get_paper_session_manager,
     get_summarizer_service,
     get_workspace_chat_store,
 )
 from paperpilot.core.models import PaperMetadata  # noqa: E402
-from paperpilot.services.grounded_qa import GroundedAnswer  # noqa: E402
+from paperpilot.services.comparison import ComparisonAnswer  # noqa: E402
+from paperpilot.services.grounded_qa import GroundedAnswer, append_chat_turn  # noqa: E402
 
 WORKSPACE_ID = uuid4()
 PAPER = PaperMetadata(paper_id=uuid4(), title="Attention Is All You Need", authors=["Vaswani"])
+PAPER_2 = PaperMetadata(paper_id=uuid4(), title="BERT", authors=["Devlin"])
 
 CITATION = {
     "rank": 1,
@@ -77,15 +80,61 @@ class StubQA:
 
     def answer(self, papers, question, chat_history=None, difficulty="graduate/expert"):
         self.calls.append({"question": question, "difficulty": difficulty})
+        answer_text = self.answer_kwargs.get("answer", "The Transformer uses multi-head attention [Page 3].")
         defaults = dict(
-            answer="The Transformer uses multi-head attention [Page 3].",
+            answer=answer_text,
+            citations=[CITATION],
+            approved=True,
+            refused=False,
+            attempts=1,
+            # Mirrors GroundedQAService.answer(), which always appends this
+            # turn to whatever history it was given — a stub that always
+            # returned [] made it impossible to test history round-tripping
+            # through the endpoint (see append_chat_turn in grounded_qa.py).
+            chat_history=append_chat_turn(chat_history or [], question, answer_text),
+        )
+        defaults.update(self.answer_kwargs)
+        return GroundedAnswer(**defaults)
+
+
+class StubChatDB:
+    """In-memory stand-in for WorkspaceManager's chat_messages table.
+
+    Keeps TestChatEndpoint/TestChatHistoryEndpoints/TestCompareEndpoint fully
+    offline (no SQLite file needed) while still exercising WorkspaceChatStore's
+    real get/set/clear write-through logic.
+    """
+
+    def __init__(self):
+        self._rows: dict[str, list[dict]] = {}
+
+    def get_chat_messages(self, workspace_id):
+        return list(self._rows.get(str(workspace_id), []))
+
+    def replace_chat_messages(self, workspace_id, messages):
+        self._rows[str(workspace_id)] = [{"role": r, "content": c} for r, c in messages]
+
+    def clear_chat_messages(self, workspace_id):
+        self._rows.pop(str(workspace_id), None)
+
+
+class StubComparison:
+    def __init__(self, **answer_kwargs):
+        self.answer_kwargs = answer_kwargs
+        self.calls = []
+
+    def compare(self, papers, axis, chat_history=None, difficulty="graduate/expert"):
+        self.calls.append({"papers": [p.paper_id for p in papers], "axis": axis, "difficulty": difficulty})
+        defaults = dict(
+            sections=[{"paper_id": str(PAPER.paper_id), "title": PAPER.title, "summary": "Uses SGD."}],
+            synthesis="They differ in optimizer.",
             citations=[CITATION],
             approved=True,
             refused=False,
             attempts=1,
         )
         defaults.update(self.answer_kwargs)
-        return GroundedAnswer(**defaults)
+        return ComparisonAnswer(**defaults)
 
 
 class StubSummarizer:
@@ -114,8 +163,15 @@ def client():
     """A TestClient with all heavyweight dependencies stubbed out."""
     app.dependency_overrides[get_db_manager] = lambda: StubDB()
     app.dependency_overrides[get_optional_grounded_qa_service] = lambda: StubQA()
+    app.dependency_overrides[get_optional_comparison_service] = lambda: StubComparison()
     app.dependency_overrides[get_summarizer_service] = lambda: StubSummarizer()
-    app.dependency_overrides[get_workspace_chat_store] = lambda: WorkspaceChatStore()
+    # A single instance, not `lambda: WorkspaceChatStore(...)`: FastAPI calls a
+    # dependency_overrides lambda fresh on every request, so a per-call lambda
+    # would give a POST and a later GET two unrelated stores/DBs and history
+    # would never appear to round-trip. Production relies on get_workspace_chat_store
+    # being @lru_cache'd for the same reason.
+    chat_store = WorkspaceChatStore(db=StubChatDB())
+    app.dependency_overrides[get_workspace_chat_store] = lambda: chat_store
     app.dependency_overrides[get_paper_session_manager] = lambda: None
     # Deliberately NOT used as a context manager: entering one runs the app's
     # lifespan, which warms the real embedding models (a multi-minute download
@@ -186,6 +242,98 @@ class TestChatEndpoint:
         override(get_db_manager, StubDB(papers=[]))
         res = client.post(f"/api/workspaces/{WORKSPACE_ID}/chat", json={"query": "q"})
         assert res.status_code == 400
+
+    def test_paper_ids_narrows_scope_but_history_still_threads(self, client):
+        override(get_db_manager, StubDB(papers=[PAPER, PAPER_2]))
+        qa = StubQA()
+        override(get_optional_grounded_qa_service, qa)
+
+        client.post(
+            f"/api/workspaces/{WORKSPACE_ID}/chat",
+            json={"query": "q1", "paper_ids": [str(PAPER.paper_id)]},
+        )
+        client.post(f"/api/workspaces/{WORKSPACE_ID}/chat", json={"query": "q2"})
+
+        # First call was scoped to one paper; the second (unscoped) call still
+        # sees the first call's turn in history, proving both calls threaded
+        # through the same store rather than paper_ids resetting memory.
+        assert qa.calls[0]["question"] == "q1"
+        assert qa.calls[1]["question"] == "q2"
+
+    def test_unknown_paper_ids_returns_400(self, client):
+        override(get_db_manager, StubDB(papers=[PAPER]))
+        res = client.post(
+            f"/api/workspaces/{WORKSPACE_ID}/chat",
+            json={"query": "q", "paper_ids": [str(uuid4())]},
+        )
+        assert res.status_code == 400
+
+
+class TestChatHistoryEndpoints:
+    def test_history_reflects_a_prior_chat_turn(self, client):
+        client.post(f"/api/workspaces/{WORKSPACE_ID}/chat", json={"query": "What architecture?"})
+
+        body = client.get(f"/api/workspaces/{WORKSPACE_ID}/chat/history").json()
+
+        roles = [m["role"] for m in body["messages"]]
+        assert roles == ["user", "assistant"]
+        assert body["messages"][0]["content"] == "What architecture?"
+
+    def test_history_is_empty_for_a_fresh_workspace(self, client):
+        body = client.get(f"/api/workspaces/{uuid4()}/chat/history").json()
+        assert body["messages"] == []
+
+    def test_delete_clears_history(self, client):
+        client.post(f"/api/workspaces/{WORKSPACE_ID}/chat", json={"query": "q"})
+
+        res = client.delete(f"/api/workspaces/{WORKSPACE_ID}/chat/history")
+        assert res.status_code == 200
+
+        body = client.get(f"/api/workspaces/{WORKSPACE_ID}/chat/history").json()
+        assert body["messages"] == []
+
+
+class TestCompareEndpoint:
+    def test_happy_path_returns_synthesis_and_sections(self, client):
+        override(get_db_manager, StubDB(papers=[PAPER, PAPER_2]))
+        res = client.post(f"/api/workspaces/{WORKSPACE_ID}/compare", json={"axis": "optimizer"})
+
+        assert res.status_code == 200
+        body = res.json()
+        assert body["synthesis"] == "They differ in optimizer."
+        assert len(body["sections"]) == 1
+        assert body["approved"] is True
+
+    def test_fewer_than_two_papers_returns_400(self, client):
+        override(get_db_manager, StubDB(papers=[PAPER]))
+        res = client.post(f"/api/workspaces/{WORKSPACE_ID}/compare", json={"axis": "optimizer"})
+        assert res.status_code == 400
+
+    def test_paper_ids_filters_the_comparison_set(self, client):
+        override(get_db_manager, StubDB(papers=[PAPER, PAPER_2]))
+        comparison = StubComparison()
+        override(get_optional_comparison_service, comparison)
+
+        client.post(
+            f"/api/workspaces/{WORKSPACE_ID}/compare",
+            json={"axis": "optimizer", "paper_ids": [str(PAPER.paper_id), str(PAPER_2.paper_id)]},
+        )
+        assert set(comparison.calls[0]["papers"]) == {PAPER.paper_id, PAPER_2.paper_id}
+
+    def test_service_unavailable_returns_503(self, client):
+        override(get_db_manager, StubDB(papers=[PAPER, PAPER_2]))
+        override(get_optional_comparison_service, None)
+
+        res = client.post(f"/api/workspaces/{WORKSPACE_ID}/compare", json={"axis": "optimizer"})
+        assert res.status_code == 503
+
+    def test_flagged_comparison_is_surfaced(self, client):
+        override(get_db_manager, StubDB(papers=[PAPER, PAPER_2]))
+        override(get_optional_comparison_service, StubComparison(approved=False, attempts=3))
+
+        body = client.post(f"/api/workspaces/{WORKSPACE_ID}/compare", json={"axis": "optimizer"}).json()
+        assert body["approved"] is False
+        assert body["attempts"] == 3
 
 
 class TestSummaryEndpoints:

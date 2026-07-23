@@ -22,6 +22,23 @@ def format_chunks_as_context(chunks: list[TextChunk]) -> str:
     return "\n\n-----------------------------------------\n\n".join(formatted_blocks)
 
 
+def format_chunks_grouped_by_paper(papers_chunks: dict[str, tuple[str, list[TextChunk]]]) -> str:
+    """Format chunks from multiple papers into one context block, labeled by source.
+
+    Comparison needs to know which chunk came from which paper — unlike chat's
+    merged-by-score retrieval, a comparison claim must be attributable to a
+    specific paper. This is the per-paper analogue of `format_chunks_as_context`.
+
+    Args:
+        papers_chunks: Maps paper_id (str) to (title, chunks) for that paper.
+    """
+    paper_blocks = []
+    for paper_id, (title, chunks) in papers_chunks.items():
+        context = format_chunks_as_context(chunks)
+        paper_blocks.append(f"=== {title} (paper_id: {paper_id}) ===\n{context}")
+    return "\n\n=========================================\n\n".join(paper_blocks)
+
+
 def clean_json_markdown(text: str) -> str:
     """Strip ```json ... ``` or ``` ... ``` markdown code-fence markers if present."""
     text = text.strip()

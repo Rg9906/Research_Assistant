@@ -28,6 +28,7 @@ def test_db_initialization(temp_db):
         assert "papers" in tables
         assert "workspace_papers" in tables
         assert "text_chunks" in tables
+        assert "chat_messages" in tables
 
 
 def test_create_workspace(temp_db):
@@ -169,3 +170,39 @@ def test_get_paper_by_id(temp_db):
     assert found.title == paper.title
 
     assert manager.get_paper_by_id(uuid4()) is None
+
+
+def test_chat_messages_round_trip_in_order(temp_db):
+    """get_chat_messages should return replace_chat_messages's rows, oldest first."""
+    manager = WorkspaceManager(temp_db)
+    ws_id = manager.create_workspace("Chat WS")
+
+    assert manager.get_chat_messages(ws_id) == []
+
+    manager.replace_chat_messages(ws_id, [("user", "hi"), ("assistant", "hello")])
+    messages = manager.get_chat_messages(ws_id)
+    assert messages == [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+
+    # A second replace fully overwrites, not appends.
+    manager.replace_chat_messages(ws_id, [("user", "only this now")])
+    assert manager.get_chat_messages(ws_id) == [{"role": "user", "content": "only this now"}]
+
+
+def test_clear_chat_messages(temp_db):
+    manager = WorkspaceManager(temp_db)
+    ws_id = manager.create_workspace("Chat WS")
+    manager.replace_chat_messages(ws_id, [("user", "hi")])
+
+    manager.clear_chat_messages(ws_id)
+
+    assert manager.get_chat_messages(ws_id) == []
+
+
+def test_delete_workspace_cascades_chat_messages(temp_db):
+    manager = WorkspaceManager(temp_db)
+    ws_id = manager.create_workspace("Chat WS")
+    manager.replace_chat_messages(ws_id, [("user", "hi")])
+
+    manager.delete_workspace(ws_id)
+
+    assert manager.get_chat_messages(ws_id) == []
