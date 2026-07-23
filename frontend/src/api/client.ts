@@ -129,6 +129,33 @@ export const summarizePaper = async (
   return res.json();
 };
 
+export interface SummaryStatus {
+  /** Levels ready on disk — fetching these is an instant cache hit. */
+  cached: string[];
+  /** Levels currently generating in the background. */
+  pending: string[];
+}
+
+/**
+ * Ask the backend to start generating every not-yet-cached summary level in the
+ * background (bounded concurrency, priority order). Returns immediately with the
+ * current status; safe to call each time the paper page opens (idempotent).
+ */
+export const prefetchSummaries = async (paperId: string): Promise<SummaryStatus> => {
+  const res = await fetch(`${API_BASE_URL}/papers/${paperId}/summaries/prefetch`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error('Failed to start summary prefetch');
+  return res.json();
+};
+
+/** Poll which summary levels are ready vs still generating. */
+export const getSummaryStatus = async (paperId: string): Promise<SummaryStatus> => {
+  const res = await fetch(`${API_BASE_URL}/papers/${paperId}/summaries`);
+  if (!res.ok) throw new Error('Failed to fetch summary status');
+  return res.json();
+};
+
 export const processPaper = async (paper: Paper): Promise<string> => {
   const res = await fetch(`${API_BASE_URL}/papers/process`, {
     method: 'POST',

@@ -1,7 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { processPaper, chatWithWorkspace, fetchSummaryLevels, summarizePaper } from '../api/client';
-import type { Paper, SummaryLevel } from '../api/client';
+import {
+  processPaper,
+  chatWithWorkspace,
+  fetchSummaryLevels,
+  summarizePaper,
+  prefetchSummaries,
+  getSummaryStatus,
+} from '../api/client';
+import type { Paper, SummaryLevel, SummaryStatus } from '../api/client';
 import { useAgentActivity } from '../context/AgentActivityContext';
 import AnswerMessage from './AnswerMessage';
 import type { AgentMessage } from './AnswerMessage';
@@ -21,6 +28,16 @@ const LOADING_MESSAGES = [
 // backend's summary-level catalogue (/api/summary-levels).
 const ABSTRACT_TAB = { id: 'abstract', label: 'Abstract', difficulty: '' };
 
+// How often to poll the backend for which summary levels have finished
+// generating in the background. 1.5s is frequent enough to feel live without
+// hammering the endpoint; polling stops as soon as nothing is pending.
+const STATUS_POLL_MS = 1500;
+
+// Per-tab lifecycle. Each tab tracks its own state so one slow summary never
+// blocks the others: 'ready' = cached/loaded, 'pending' = generating in the
+// background, 'loading' = this client is actively fetching it, 'error' = failed.
+type TabStatus = 'idle' | 'pending' | 'loading' | 'ready' | 'error';
+
 const PaperSummary: React.FC = () => {
   const { state } = useLocation();
   const navigate = useNavigate();
@@ -28,7 +45,11 @@ const PaperSummary: React.FC = () => {
   const { withActivity } = useAgentActivity();
 
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  // `isProcessing` drives the explicit full-screen "Preparing Paper" modal (the
+  // manual "Chat with Paper" path). `indexing` covers the silent auto-prepare
+  // that runs on page open — it shows in the HUD but never blocks the screen.
   const [isProcessing, setIsProcessing] = useState(false);
+  const [indexing, setIndexing] = useState(false);
   const [processError, setProcessError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -39,7 +60,22 @@ const PaperSummary: React.FC = () => {
   const [levels, setLevels] = useState<SummaryLevel[]>([]);
   const [activeTab, setActiveTab] = useState(ABSTRACT_TAB.id);
   const [tabContent, setTabContent] = useState<Record<string, string>>({});
-  const [tabLoading, setTabLoading] = useState(false);
+  const [tabState, setTabState] = useState<Record<string, TabStatus>>({});
+
+  // A single in-flight prepare(index) promise shared by the auto and manual
+  // paths, so the PDF is never indexed twice concurrently.
+  const prepareRef = useRef<Promise<string> | null>(null);
+  // Level ids with a fetch currently in flight (dedup) and ids already loaded
+  // (so background warming doesn't re-fetch on every poll). Refs, not state, so
+  // reading them in async callbacks never sees a stale render snapshot.
+  const inFlightRef = useRef<Set<string>>(new Set());
+  const loadedRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // Tabs are whatever the backend offers, so adding a summary level is a
   // backend-only change. A failure here just leaves the abstract tab.
@@ -60,6 +96,136 @@ const PaperSummary: React.FC = () => {
     return () => clearInterval(interval);
   }, [isProcessing]);
 
+  const setTab = useCallback((id: string, status: TabStatus) => {
+    setTabState(prev => (prev[id] === status ? prev : { ...prev, [id]: status }));
+  }, []);
+
+  // Index the PDF exactly once. Returns the workspace id; both the silent
+  // auto-prepare and the manual button funnel through here so they can never
+  // start two indexing jobs for the same paper.
+  const ensurePrepared = useCallback((): Promise<string> => {
+    if (workspaceId) return Promise.resolve(workspaceId);
+    if (prepareRef.current) return prepareRef.current;
+    if (!paper) return Promise.reject(new Error('No paper'));
+
+    setIndexing(true);
+    const p = processPaper(paper)
+      .then(wId => {
+        if (mountedRef.current) setWorkspaceId(wId);
+        return wId;
+      })
+      .catch(err => {
+        prepareRef.current = null; // allow a retry
+        throw err;
+      })
+      .finally(() => {
+        if (mountedRef.current) setIndexing(false);
+      });
+    prepareRef.current = p;
+    return p;
+  }, [workspaceId, paper]);
+
+  // The moment the page opens: if the paper has a PDF, quietly start indexing
+  // in the background so summaries can begin generating without the user having
+  // to click "Chat with Paper" first. Silent — errors here don't hijack the
+  // screen; the manual button still surfaces them.
+  useEffect(() => {
+    if (paper?.pdf_url && !workspaceId) {
+      ensurePrepared().catch(err => console.error('Auto-prepare failed', err));
+    }
+    // Run once on mount; ensurePrepared is idempotent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadSummary = useCallback(
+    async (tabId: string, opts: { regenerate?: boolean; background?: boolean } = {}) => {
+      const { regenerate = false, background = false } = opts;
+      const tab = levels.find(t => t.id === tabId);
+      if (!tab || !workspaceId) return;
+      // Dedup concurrent fetches of the same level (a background warm and a
+      // click can race). Regenerate is a deliberate override and always runs.
+      if (inFlightRef.current.has(tabId) && !regenerate) return;
+
+      inFlightRef.current.add(tabId);
+      setTab(tabId, 'loading');
+      const call = () => summarizePaper(paper!.paper_id, tabId, regenerate);
+      try {
+        // Background warms (cache hits) stay off the navbar HUD so it doesn't
+        // thrash; foreground generations show there as real activity.
+        const result = background
+          ? await call()
+          : await withActivity(`Generating ${tab.label.toLowerCase()} view...`, call);
+        if (!mountedRef.current) return;
+        loadedRef.current.add(tabId);
+        setTabContent(prev => ({ ...prev, [tabId]: result.summary }));
+        setTab(tabId, 'ready');
+      } catch (err) {
+        console.error(err);
+        if (!mountedRef.current) return;
+        // Surface the backend's actual reason (e.g. "the link did not return a
+        // valid PDF") rather than a blanket "try again".
+        const reason =
+          err instanceof Error && err.message ? err.message : 'Could not generate this view.';
+        setTabContent(prev => ({ ...prev, [tabId]: reason }));
+        setTab(tabId, 'error');
+      } finally {
+        inFlightRef.current.delete(tabId);
+      }
+    },
+    [levels, workspaceId, paper, withActivity, setTab],
+  );
+
+  // Once the paper is indexed, ask the backend to prefetch every summary level
+  // in the background (bounded, prioritized), then poll for readiness and warm
+  // the text of finished tabs so switching to them is instant.
+  useEffect(() => {
+    if (!workspaceId || !paper) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const applyStatus = (status: SummaryStatus) => {
+      if (cancelled) return;
+      setTabState(prev => {
+        const next = { ...prev };
+        for (const id of status.cached) {
+          if (next[id] !== 'loading') next[id] = 'ready';
+        }
+        for (const id of status.pending) {
+          if (!next[id] || next[id] === 'idle') next[id] = 'pending';
+        }
+        return next;
+      });
+      // Warm the text for ready-but-unloaded levels — these are server cache
+      // hits (no LLM), so clicking the tab later is instant.
+      for (const id of status.cached) {
+        if (!loadedRef.current.has(id) && !inFlightRef.current.has(id)) {
+          loadSummary(id, { background: true });
+        }
+      }
+    };
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const status = await getSummaryStatus(paper.paper_id);
+        applyStatus(status);
+        if (status.pending.length === 0) return; // everything settled — stop
+      } catch {
+        // Transient error — keep polling.
+      }
+      if (!cancelled) timer = setTimeout(poll, STATUS_POLL_MS);
+    };
+
+    prefetchSummaries(paper.paper_id).then(applyStatus).catch(() => {});
+    timer = setTimeout(poll, STATUS_POLL_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
+
   if (!paper) {
     return (
       <div className="flex flex-col items-center justify-center pt-24 pb-32">
@@ -71,14 +237,21 @@ const PaperSummary: React.FC = () => {
     );
   }
 
+  const openChat = () => {
+    setChatOpen(true);
+    setMessages(prev =>
+      prev.length
+        ? prev
+        : [{ role: 'agent', content: `Hello! I've read "${paper.title}". What would you like to know about it?` }],
+    );
+  };
+
   const handleProcessPaper = async () => {
     setIsProcessing(true);
     setProcessError(null);
     try {
-      const wId = await withActivity('Reading and indexing paper...', () => processPaper(paper));
-      setWorkspaceId(wId);
-      setChatOpen(true);
-      setMessages([{ role: 'agent', content: `Hello! I've read "${paper.title}". What would you like to know about it?` }]);
+      await withActivity('Reading and indexing paper...', ensurePrepared);
+      openChat();
     } catch (err) {
       console.error(err);
       // Surface the backend's reason. "Failed to process, please try again"
@@ -120,41 +293,39 @@ const PaperSummary: React.FC = () => {
     }
   };
 
-  const loadSummary = async (tabId: string, regenerate = false) => {
-    const tab = levels.find(t => t.id === tabId);
-    if (!tab || !workspaceId) return;
-
-    setTabLoading(true);
-    try {
-      // Summaries are cached server-side per paper+level, so revisiting a tab
-      // is instant and costs nothing; `regenerate` is the deliberate opt-out.
-      const result = await withActivity(`Generating ${tab.label.toLowerCase()} view...`, () =>
-        summarizePaper(paper.paper_id, tabId, regenerate)
-      );
-      setTabContent(prev => ({ ...prev, [tabId]: result.summary }));
-    } catch (err) {
-      console.error(err);
-      // Surface the backend's actual reason (e.g. "the link did not return a
-      // valid PDF") rather than a blanket "try again" — for a paper whose PDF
-      // can't be fetched, retrying can never succeed.
-      const reason =
-        err instanceof Error && err.message
-          ? err.message
-          : 'Could not generate this view.';
-      setTabContent(prev => ({ ...prev, [tabId]: reason }));
-    } finally {
-      setTabLoading(false);
-    }
-  };
-
-  const handleTabClick = async (tabId: string) => {
+  const handleTabClick = (tabId: string) => {
     setActiveTab(tabId);
-    if (tabId === ABSTRACT_TAB.id || tabContent[tabId]) return;
-    await loadSummary(tabId);
+    if (tabId === ABSTRACT_TAB.id) return;
+    // Already have it, or a fetch is already in flight (background warm / click).
+    if (loadedRef.current.has(tabId) || inFlightRef.current.has(tabId)) return;
+    // Foreground fetch: shows on the HUD and resolves the moment the content is
+    // ready — if a background prefetch is mid-generation for this level, the
+    // backend dedups so this just waits for that result instead of paying again.
+    loadSummary(tabId);
   };
 
   const allTabs = [ABSTRACT_TAB, ...levels];
   const activeTabMeta = allTabs.find(t => t.id === activeTab);
+  const activeLabel = activeTabMeta?.label.toLowerCase();
+  const activeContent = tabContent[activeTab];
+  const activeStatus = tabState[activeTab];
+
+  // Background-prep progress for the HUD ("thinking ahead" cue).
+  const summaryTotal = levels.length;
+  const summaryReady = levels.filter(l => loadedRef.current.has(l.id) || tabState[l.id] === 'ready').length;
+  const prepDone = summaryTotal > 0 && summaryReady >= summaryTotal;
+
+  const renderTabIndicator = (tabId: string) => {
+    const ready = tabContent[tabId] || tabState[tabId] === 'ready';
+    const busy = tabState[tabId] === 'loading' || tabState[tabId] === 'pending';
+    if (ready) {
+      return <span className="material-symbols-outlined text-[14px] text-secondary">check_circle</span>;
+    }
+    if (busy) {
+      return <span className="material-symbols-outlined text-[14px] animate-spin opacity-70">progress_activity</span>;
+    }
+    return null;
+  };
 
   return (
     <div className="min-h-screen bg-background text-on-background font-body-ui">
@@ -191,13 +362,14 @@ const PaperSummary: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => handleTabClick(tab.id)}
-                className={`whitespace-nowrap px-5 py-2.5 rounded-lg font-bold shadow-sm transition-all text-sm ${
+                className={`whitespace-nowrap px-5 py-2.5 rounded-lg font-bold shadow-sm transition-all text-sm flex items-center gap-1.5 ${
                   activeTab === tab.id
                     ? 'text-primary bg-primary-container'
                     : 'text-on-surface-variant hover:bg-surface-container-high/50'
                 }`}
               >
                 {tab.label}
+                {tab.id !== ABSTRACT_TAB.id && renderTabIndicator(tab.id)}
               </button>
             ))}
           </div>
@@ -208,30 +380,37 @@ const PaperSummary: React.FC = () => {
               {activeTab === ABSTRACT_TAB.id ? (
                 <p className="mb-6 whitespace-pre-wrap">{paper.abstract}</p>
               ) : !workspaceId ? (
-                <p className="text-on-surface-variant italic">
-                  {paper.pdf_url
-                    ? `Click "Chat with Paper" below to unlock the AI-generated ${activeTabMeta?.label.toLowerCase()} view.`
-                    : `This paper has no open-access PDF, so the ${activeTabMeta?.label.toLowerCase()} view can't be generated — summaries are written only from the paper's own text.`}
+                <p className="text-on-surface-variant italic flex items-center gap-2">
+                  {indexing ? (
+                    <>
+                      <span className="material-symbols-outlined animate-spin text-sm">sync</span>
+                      Preparing this paper — the {activeLabel} view will appear automatically once indexing finishes.
+                    </>
+                  ) : paper.pdf_url ? (
+                    `Click "Chat with Paper" below to unlock the AI-generated ${activeLabel} view.`
+                  ) : (
+                    `This paper has no open-access PDF, so the ${activeLabel} view can't be generated — summaries are written only from the paper's own text.`
+                  )}
                 </p>
-              ) : tabLoading && !tabContent[activeTab] ? (
+              ) : activeContent ? (
+                <>
+                  <p className="mb-4 whitespace-pre-wrap">{activeContent}</p>
+                  <button
+                    onClick={() => loadSummary(activeTab, { regenerate: true })}
+                    disabled={activeStatus === 'loading'}
+                    className="flex items-center gap-1.5 text-xs font-bold text-secondary hover:underline disabled:opacity-50"
+                  >
+                    <span className={`material-symbols-outlined text-sm ${activeStatus === 'loading' ? 'animate-spin' : ''}`}>refresh</span>
+                    Regenerate
+                  </button>
+                </>
+              ) : (
                 <p className="text-on-surface-variant italic flex items-center gap-2">
                   <span className="material-symbols-outlined animate-spin text-sm">sync</span>
-                  Generating {activeTabMeta?.label.toLowerCase()} view...
+                  {activeStatus === 'pending'
+                    ? `Preparing ${activeLabel} view in the background…`
+                    : `Generating ${activeLabel} view...`}
                 </p>
-              ) : (
-                <>
-                  <p className="mb-4 whitespace-pre-wrap">{tabContent[activeTab]}</p>
-                  {tabContent[activeTab] && (
-                    <button
-                      onClick={() => loadSummary(activeTab, true)}
-                      disabled={tabLoading}
-                      className="flex items-center gap-1.5 text-xs font-bold text-secondary hover:underline disabled:opacity-50"
-                    >
-                      <span className={`material-symbols-outlined text-sm ${tabLoading ? 'animate-spin' : ''}`}>refresh</span>
-                      Regenerate
-                    </button>
-                  )}
-                </>
               )}
             </article>
           </section>
@@ -243,8 +422,8 @@ const PaperSummary: React.FC = () => {
             <div className="flex items-center justify-between mb-2">
               <span className="font-label-caps text-label-caps text-on-surface-variant">AGENT HUD</span>
               <div className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${isProcessing ? 'bg-secondary animate-pulse' : (workspaceId ? 'bg-emerald-500' : 'bg-outline')}`}></span>
-                <span className="text-[10px] font-bold text-secondary tracking-widest">{isProcessing ? 'ANALYZING' : (workspaceId ? 'READY' : 'IDLE')}</span>
+                <span className={`w-2 h-2 rounded-full ${(isProcessing || indexing) ? 'bg-secondary animate-pulse' : (workspaceId ? 'bg-emerald-500' : 'bg-outline')}`}></span>
+                <span className="text-[10px] font-bold text-secondary tracking-widest">{(isProcessing || indexing) ? 'ANALYZING' : (workspaceId ? 'READY' : 'IDLE')}</span>
               </div>
             </div>
 
@@ -260,7 +439,38 @@ const PaperSummary: React.FC = () => {
               ) : (
                 <div className="p-3 bg-surface rounded-lg border border-outline-variant/20">
                   <p className="text-sm font-medium text-on-surface-variant">
-                    {workspaceId ? 'Paper embedded successfully. Ready for questions.' : 'Click "Chat with Paper" to analyze.'}
+                    {indexing
+                      ? 'Reading and indexing the paper…'
+                      : (workspaceId ? 'Paper embedded successfully. Ready for questions.' : 'Click "Chat with Paper" to analyze.')}
+                  </p>
+                </div>
+              )}
+
+              {/* Background summary-prep progress: the "thinking ahead" cue. */}
+              {workspaceId && summaryTotal > 0 && (
+                <div className="p-3 bg-surface rounded-lg border border-outline-variant/20 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-mono-technical text-on-surface-variant uppercase">Summary Views</p>
+                    <span className="text-[11px] font-bold text-secondary">{summaryReady}/{summaryTotal}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-surface-container-high rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-secondary transition-all duration-500 rounded-full"
+                      style={{ width: `${summaryTotal ? (summaryReady / summaryTotal) * 100 : 0}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-[11px] text-on-surface-variant/80 flex items-center gap-1.5">
+                    {prepDone ? (
+                      <>
+                        <span className="material-symbols-outlined text-[13px] text-secondary">check_circle</span>
+                        All summary views ready — switch tabs instantly.
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>
+                        Preparing summaries ahead of you…
+                      </>
+                    )}
                   </p>
                 </div>
               )}
@@ -272,7 +482,9 @@ const PaperSummary: React.FC = () => {
       {/* Full-screen overlay for the "prepare paper" step. It stays up for BOTH
           the in-progress state AND a failure, so a fast failure (e.g. a paywalled
           or dead PDF link that 403s) no longer flashes and vanishes — the reason
-          stays on screen with a way to retry or dismiss. */}
+          stays on screen with a way to retry or dismiss. Only the MANUAL path
+          (explicit "Chat with Paper") opens this; the silent auto-prepare never
+          blocks the screen. */}
       {(isProcessing || processError) && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in p-4">
           <div className="bg-surface-container-lowest p-8 rounded-2xl shadow-2xl border border-outline-variant/30 max-w-sm w-full text-center space-y-6">
@@ -335,7 +547,7 @@ const PaperSummary: React.FC = () => {
       {!chatOpen && !isProcessing && (
         paper.pdf_url ? (
           <button
-            onClick={workspaceId ? () => setChatOpen(true) : handleProcessPaper}
+            onClick={workspaceId ? openChat : handleProcessPaper}
             className="fixed bottom-24 right-6 md:right-12 z-50 text-white flex items-center gap-3 px-6 py-4 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all group bg-primary"
           >
             <span className="material-symbols-outlined group-hover:rotate-12 transition-transform">

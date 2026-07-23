@@ -1,9 +1,9 @@
 # CLAUDE.md — PaperPilot AI Engineering Handbook
 
 This is the permanent engineering reference for this repository. It reflects
-the actual state of the code as of the last update (2026-07-18, post
-cleanup-pass), not aspirational design. When code and this document
-disagree, trust the code and update this document.
+the actual state of the code as of the last update (2026-07-23, post dark-mode
+pass), not aspirational design. When code and this document disagree, trust
+the code and update this document.
 
 ## 1. What this project is
 
@@ -33,12 +33,12 @@ harder.
 | `src/paperpilot/agent/` | `planner.py`, `tutor.py`, `critic.py` — LangChain `BaseChatModel`-based agents implementing the grounded-QA + self-critique contract, plus `formatting.py` (shared `clean_json_markdown` / `format_chunks_as_context` helpers used by all three). See §4 for their current (disconnected) status. |
 | `src/paperpilot/graph/` | `state.py` (`AgentState` TypedDict), `nodes.py` (`AgentNodes`), `builder.py` (LangGraph `StateGraph` + routers). Compiles a planner→search→retrieve→tutor→critic loop. Not wired to the API — see §4. |
 | `src/paperpilot/services/grounded_qa.py` | **The production QA path.** `GroundedQAService` joins the two stacks: retrieval via `PaperSessionManager.retrieve_across_papers` (Stack B) → `TutorAgent` → `CriticAgent` → bounded retry (Stack A). `nodes_to_chunks` is the single LlamaIndex→`TextChunk` translation point. See §4. |
-| `src/paperpilot/services/summarizer.py` | `SummarizerService` + `SUMMARY_LEVELS` — the ten summary views from `ProjectIdea.txt`, generated through `GroundedQAService` (so summaries are audited too) and cached on disk per paper+level at `storage/papers/paper_<id>/summaries.json`. |
+| `src/paperpilot/services/summarizer.py` | `SummarizerService` + `SUMMARY_LEVELS` — the ten summary views from `ProjectIdea.txt`, generated through `GroundedQAService` (so summaries are audited too) and cached on disk per paper+level at `storage/papers/paper_<id>/summaries.json`. Also owns **background prefetching**: `prefetch()` generates every uncached level ahead of the user on a bounded `ThreadPoolExecutor` (`rag_prefetch_workers`, default 2) in `PREFETCH_PRIORITY` order; a per-`(paper, level)` lock means a prefetch and an on-demand click for the same level share one LLM call, and a per-paper file lock makes the parallel cache writes atomic. `status()`/`pending_levels()` back the polling endpoint. |
 | `src/paperpilot/services/paper_chat/` | **The document-intelligence stack.** `session.py` (`PaperSession`, `PaperSessionManager`, `MultiPaperRetriever`) owns LlamaIndex document loading, chunking, indexing, persistence, single- and multi-paper chat. `exceptions.py` holds the domain exception hierarchy. |
 | `src/paperpilot/workspace/manager.py` | `WorkspaceManager` — SQLite (`data/workspace.db`) for workspaces, papers, workspace↔paper mapping, and a legacy `text_chunks` table (vestigial — populated with `chunks=[]` everywhere now that LlamaIndex owns chunk storage on disk). `_get_connection()` is a contextmanager that always closes the connection. |
 | `src/paperpilot/pipeline.py` | `DocumentPipeline` — facade over `PaperSessionManager` + `WorkspaceManager`, used by the LangGraph nodes and by metadata sync (`sync_paper_metadata` now calls the public `WorkspaceManager.get_paper_by_id`). |
 | `src/app/` | FastAPI backend (`api.py`, `utils.py`). **Not an installed package** — no `__init__.py`. Run from `src/` so `app` resolves as a namespace package, e.g. `uvicorn app.api:app --reload` from inside `src/`. `templates.html` is a static design mockup, never served. |
-| `frontend/` | React 19 + Vite + TypeScript + Tailwind (Material-3-style token palette in `tailwind.config.js`). Routes: `/` (DiscoveryFeed — search), `/library` (ResearchLibrary — workspaces, click-through to detail), `/paper/:paperId` (PaperSummary — abstract + tabbed AI views + chat), `/workspace/:workspaceId` (WorkspaceDetail — multi-paper workspace chat). `src/context/AgentActivityContext.tsx` provides real in-flight-request status to the navbar. `src/api/client.ts` is the single fetch layer; base URL is hardcoded to `http://localhost:8000/api`. |
+| `frontend/` | React 19 + Vite + TypeScript + Tailwind (Material-3-style token palette). Routes: `/` (DiscoveryFeed — search), `/library` (ResearchLibrary — workspaces, click-through to detail), `/paper/:paperId` (PaperSummary — abstract + tabbed AI views + chat), `/workspace/:workspaceId` (WorkspaceDetail — multi-paper workspace chat). `src/context/AgentActivityContext.tsx` provides real in-flight-request status to the navbar. `src/context/ThemeContext.tsx` provides light/dark mode: the whole token palette lives as CSS custom properties in `src/index.css` (`:root` = light, `.dark` overrides), and `tailwind.config.js` colors resolve through `rgb(var(--color-x) / <alpha-value>)` so a single `.dark` class on `<html>`, toggled from `Layout.tsx`'s navbar button, re-themes every token-based component at once. Preference persists to `localStorage` (`pp_theme`); `frontend/index.html` has an inline pre-hydration script that applies the stored class before first paint to avoid a light-mode flash. The landing/splash screen (`components/splash/`) has its own hardcoded styling and is intentionally unaffected by the toggle. `src/api/client.ts` is the single fetch layer; base URL is hardcoded to `http://localhost:8000/api`. |
 | `tests/` | pytest suite, `pythonpath=src` (see `pyproject.toml`), fully offline — external calls are mocked/stubbed. `tests/test_tutor.py::StubChatModel` is reused across planner/critic/graph tests; keep that pattern. |
 | `data/` | Runtime SQLite DB + legacy FAISS indexes. Gitignored. |
 | `storage/papers/paper_<uuid>/{index,cache}` | Per-paper LlamaIndex persistence directory (docstore + fingerprint.json). Gitignored. |
@@ -74,6 +74,14 @@ React (chat: PaperSummary or WorkspaceDetail) --POST /api/workspaces/{id}/chat--
 React (PaperSummary tabs) --GET /api/summary-levels--> the 10 level definitions
   --POST /api/papers/{paper_id}/summary/{level_id}[?regenerate=true]--> FastAPI
   --> SummarizerService: disk cache hit (no LLM call) or generate via GroundedQAService
+
+React (PaperSummary, on open) auto-indexes the PDF, then
+  --POST /api/papers/{paper_id}/summaries/prefetch--> starts background generation
+      of every uncached level (bounded pool, priority order) and returns at once
+  --GET  /api/papers/{paper_id}/summaries--> polled for {cached, pending} so tabs
+      fill in independently and switching to a prepared tab is instant. The
+      per-level lock makes a click during prefetch reuse the in-flight result
+      rather than paying twice.
 ```
 
 ## 4. The two stacks, and how they are now joined
@@ -367,6 +375,7 @@ These were all invisible to the offline suite — every one needed a real call.
 | Streaming responses | `PaperSession.stream()` exists but no endpoint exposes it |
 | Workspace browsing UI | `WorkspaceDetail` page (`/workspace/:workspaceId`) lists papers and lets you chat with the whole workspace; `ResearchLibrary` cards now navigate there |
 | Live agent-activity status | Navbar reflects real in-flight requests via `AgentActivityContext`, not a hardcoded string |
+| Light/dark theme | Done — `ThemeContext` toggles a `.dark` class on `<html>`; the Material-3 palette is CSS-variable-driven (`index.css`) so every token-based component re-themes at once; preference persists to `localStorage` and is applied pre-paint to avoid a flash |
 
 ## 9. Working agreement for making changes here
 
@@ -395,7 +404,8 @@ These were all invisible to the offline suite — every one needed a real call.
   test.
 - New endpoints/features need at least one offline test following the
   existing per-module test file convention (`tests/test_<module>.py`).
-- Current offline suite: 115 tests pass fully offline. `tests/test_api.py` uses
+- Current offline suite: 173 tests pass fully offline (182 collected total;
+  the 9 in `tests/test_embedder.py` need network, see below). `tests/test_api.py` uses
   FastAPI `dependency_overrides` + `TestClient` (deliberately *not* as a context
   manager, so the model-warming lifespan is skipped) — follow that pattern for
   new endpoints.

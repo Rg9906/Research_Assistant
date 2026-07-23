@@ -153,6 +153,12 @@ class SummaryResponse(BaseModel):
     # and offer regeneration only where it means something.
     from_cache: bool
 
+class SummaryStatusResponse(BaseModel):
+    # Which levels are ready on disk (instant) vs still generating in the
+    # background, so the UI can prefetch tabs and show per-tab readiness.
+    cached: List[str] = []
+    pending: List[str] = []
+
 class ProcessPaperRequest(BaseModel):
     paper_id: UUID
     title: str
@@ -300,6 +306,48 @@ def summarize_paper(
     return SummaryResponse(
         paper_id=paper_id, level_id=level_id, summary=summary, from_cache=from_cache
     )
+
+
+@app.post("/api/papers/{paper_id}/summaries/prefetch", response_model=SummaryStatusResponse)
+def prefetch_summaries(
+    paper_id: UUID,
+    db: WorkspaceManager = Depends(get_db_manager),
+    summarizer: SummarizerService = Depends(get_summarizer_service),
+):
+    """Start background generation of every not-yet-cached summary level.
+
+    Returns immediately with the current status; generation continues on a
+    bounded background pool so the tabs are ready (or nearly so) before the user
+    clicks them. Idempotent — safe to call every time the paper page opens.
+    """
+    if not _get_settings().rag_prefetch_enabled:
+        # Prefetch disabled: report status without scheduling any work, so the
+        # UI degrades cleanly to click-to-generate.
+        paper = db.get_paper_by_id(paper_id)
+        if paper is None:
+            raise HTTPException(status_code=404, detail="Paper not found. Process it first.")
+        return SummaryStatusResponse(**summarizer.status(paper))
+
+    paper = db.get_paper_by_id(paper_id)
+    if paper is None:
+        raise HTTPException(status_code=404, detail="Paper not found. Process it first.")
+    try:
+        return SummaryStatusResponse(**summarizer.prefetch(paper))
+    except Exception as e:
+        raise _fail(500, f"Failed to start summary prefetch for '{paper.title}'", e)
+
+
+@app.get("/api/papers/{paper_id}/summaries", response_model=SummaryStatusResponse)
+def summary_status(
+    paper_id: UUID,
+    db: WorkspaceManager = Depends(get_db_manager),
+    summarizer: SummarizerService = Depends(get_summarizer_service),
+):
+    """Which summary levels are ready vs still generating (for the UI to poll)."""
+    paper = db.get_paper_by_id(paper_id)
+    if paper is None:
+        raise HTTPException(status_code=404, detail="Paper not found. Process it first.")
+    return SummaryStatusResponse(**summarizer.status(paper))
 
 
 @app.post("/api/papers/process")

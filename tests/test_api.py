@@ -101,6 +101,13 @@ class StubSummarizer:
         self.calls.append({"level_id": level_id, "regenerate": regenerate})
         return self.summary, self.from_cache
 
+    def prefetch(self, paper):
+        self.calls.append({"prefetch": True})
+        return {"cached": ["quick"], "pending": ["beginner", "technical"]}
+
+    def status(self, paper):
+        return {"cached": ["quick"], "pending": ["beginner"]}
+
 
 @pytest.fixture
 def client():
@@ -226,3 +233,37 @@ class TestSummaryEndpoints:
 
         res = client.post(f"/api/papers/{PAPER.paper_id}/summary/not-a-level")
         assert res.status_code == 400
+
+
+class TestSummaryPrefetchEndpoints:
+    def test_prefetch_triggers_background_generation(self, client):
+        override(get_db_manager, StubDB(paper=PAPER))
+        summarizer = StubSummarizer()
+        override(get_summarizer_service, summarizer)
+
+        res = client.post(f"/api/papers/{PAPER.paper_id}/summaries/prefetch")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["cached"] == ["quick"]
+        assert body["pending"] == ["beginner", "technical"]
+        assert {"prefetch": True} in summarizer.calls
+
+    def test_prefetch_unknown_paper_returns_404(self, client):
+        override(get_db_manager, StubDB(paper=None))
+        res = client.post(f"/api/papers/{uuid4()}/summaries/prefetch")
+        assert res.status_code == 404
+
+    def test_status_reports_cached_and_pending(self, client):
+        override(get_db_manager, StubDB(paper=PAPER))
+        override(get_summarizer_service, StubSummarizer())
+
+        res = client.get(f"/api/papers/{PAPER.paper_id}/summaries")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["cached"] == ["quick"]
+        assert body["pending"] == ["beginner"]
+
+    def test_status_unknown_paper_returns_404(self, client):
+        override(get_db_manager, StubDB(paper=None))
+        res = client.get(f"/api/papers/{uuid4()}/summaries")
+        assert res.status_code == 404

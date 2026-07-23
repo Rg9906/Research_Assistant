@@ -6,6 +6,8 @@ these tests cover caching, level definitions, and the no-history guarantee
 without any LLM involvement. `tmp_path` isolates the cache directory.
 """
 
+import threading
+import time
 from uuid import uuid4
 
 import pytest
@@ -14,6 +16,7 @@ from paperpilot.core.models import PaperMetadata
 from paperpilot.services.grounded_qa import GroundedAnswer
 from paperpilot.services.summarizer import (
     LEVELS_BY_ID,
+    PREFETCH_PRIORITY,
     SUMMARY_LEVELS,
     SummarizerService,
 )
@@ -209,3 +212,123 @@ class TestSummarize:
         summary, from_cache = service.summarize(paper, "quick")
         assert from_cache is False
         assert summary == "A generated summary."
+
+
+def _drain(service, paper, timeout=10.0):
+    """Block until the paper's background prefetch queue is empty."""
+    end = time.time() + timeout
+    while service.pending_levels(paper) and time.time() < end:
+        time.sleep(0.02)
+    assert not service.pending_levels(paper), "prefetch did not finish in time"
+
+
+class TestPrefetch:
+    def test_prefetch_generates_every_level_once(self, tmp_path, paper):
+        service, qa = make_service(tmp_path)
+        service.prefetch(paper)
+        _drain(service, paper)
+
+        assert set(service.get_cached_levels(paper)) == set(LEVELS_BY_ID)
+        assert len(qa.calls) == len(LEVELS_BY_ID)
+
+    def test_prefetch_skips_already_cached_levels(self, tmp_path, paper):
+        service, qa = make_service(tmp_path)
+        service.summarize(paper, "quick")  # 1 call
+        assert len(qa.calls) == 1
+
+        service.prefetch(paper)
+        _drain(service, paper)
+
+        # Every level generated exactly once — the pre-cached "quick" is not redone.
+        assert len(qa.calls) == len(LEVELS_BY_ID)
+
+    def test_prefetch_is_idempotent(self, tmp_path, paper):
+        service, qa = make_service(tmp_path)
+        service.prefetch(paper)
+        _drain(service, paper)
+        calls_after_first = len(qa.calls)
+
+        service.prefetch(paper)  # everything already cached
+        _drain(service, paper)
+        assert len(qa.calls) == calls_after_first
+
+    def test_prefetch_respects_priority_order(self, tmp_path, paper):
+        # One worker makes execution order == submission order == priority order.
+        qa = StubQAService()
+        service = SummarizerService(qa_service=qa, storage_dir=tmp_path, prefetch_workers=1)
+        service.prefetch(paper)
+        _drain(service, paper)
+
+        prompt_to_id = {level.prompt: level.id for level in SUMMARY_LEVELS}
+        generated_order = [prompt_to_id[c["question"]] for c in qa.calls]
+        expected = [lid for lid in PREFETCH_PRIORITY if lid in LEVELS_BY_ID]
+        assert generated_order == expected
+
+    def test_status_reports_cached_levels(self, tmp_path, paper):
+        service, _ = make_service(tmp_path)
+        service.summarize(paper, "quick")
+        status = service.status(paper)
+        assert status["cached"] == ["quick"]
+        assert status["pending"] == []
+
+
+class TestConcurrencySafety:
+    def test_concurrent_same_level_generates_once(self, tmp_path, paper):
+        """A background prefetch and an on-demand click for the same level must
+        not both pay for the LLM — the second waits and gets the cache."""
+        qa = BlockingQAService()
+        service = SummarizerService(qa_service=qa, storage_dir=tmp_path)
+
+        results: list[tuple[str, bool]] = []
+        lock = threading.Lock()
+
+        def worker():
+            r = service.summarize(paper, "quick")
+            with lock:
+                results.append(r)
+
+        t1 = threading.Thread(target=worker)
+        t1.start()
+        assert qa.entered.wait(timeout=5), "first generation never started"
+        # First thread now holds the level lock inside answer(); start the second.
+        t2 = threading.Thread(target=worker)
+        t2.start()
+        time.sleep(0.1)  # let t2 reach and block on the key lock
+        qa.release.set()
+
+        t1.join(timeout=5)
+        t2.join(timeout=5)
+
+        assert qa.call_count == 1, "the LLM must be invoked once for one level"
+        assert {r[0] for r in results} == {"A generated summary."}
+        assert True in {r[1] for r in results}, "one caller should report a cache hit"
+
+    def test_parallel_levels_do_not_clobber_the_cache_file(self, tmp_path, paper):
+        service = SummarizerService(
+            qa_service=StubQAService(), storage_dir=tmp_path, prefetch_workers=4
+        )
+        service.prefetch(paper)
+        _drain(service, paper)
+
+        # All levels must survive in the single JSON file despite parallel writes.
+        assert set(service.get_cached_levels(paper)) == set(LEVELS_BY_ID)
+
+
+class BlockingQAService:
+    """Blocks inside answer() until released, so two threads can be forced to
+    contend on the same (paper, level)."""
+
+    def __init__(self):
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.call_count = 0
+        self._lock = threading.Lock()
+
+    def answer(self, *args, **kwargs):
+        with self._lock:
+            self.call_count += 1
+        self.entered.set()
+        self.release.wait(timeout=5)
+        return GroundedAnswer(
+            answer="A generated summary.", citations=[], approved=True, refused=False, attempts=1
+        )

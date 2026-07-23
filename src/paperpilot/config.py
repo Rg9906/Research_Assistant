@@ -138,6 +138,17 @@ class Settings(BaseSettings):
     # answer, so each summary costs roughly double its chunk budget in tokens.
     # 10 chunks overran a Groq free-tier 6000 TPM limit in live testing.
     rag_summary_top_k: int = 6
+    # Background summary prefetching (services/summarizer.py): when a paper page
+    # opens, all remaining summary levels are generated ahead of the user
+    # clicking their tabs, so switching tabs feels instant. Concurrency is
+    # deliberately bounded — each level is a full grounded answer (tutor + critic
+    # over the paper's context), so firing all ten at once would blow the LLM
+    # provider's per-minute token quota (see the token-budgeting note above).
+    # 2 workers ≈ the parallelism a free-tier quota sustains without constant
+    # 429s; raise it if your provider quota is higher. Set enabled=false to fall
+    # back to the old click-to-generate behaviour.
+    rag_prefetch_enabled: bool = True
+    rag_prefetch_workers: int = 2
     rag_grounded_qa_enabled: bool = True
     rag_max_critique_retries: int = 2
     # Set false on small per-minute LLM quotas: the audit re-sends the whole
