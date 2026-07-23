@@ -1,11 +1,14 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAgentActivity } from '../context/AgentActivityContext';
+import { useTheme } from '../context/ThemeContext';
 import { RETURN_HOME_EVENT } from '../App';
 
 const Layout: React.FC = () => {
   const location = useLocation();
   const { isActive, label } = useAgentActivity();
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === 'dark';
 
   // Return to the landing / splash page (handled in App, which replays the intro).
   const returnToLanding = () => window.dispatchEvent(new Event(RETURN_HOME_EVENT));
@@ -25,6 +28,20 @@ const Layout: React.FC = () => {
                 Agent: <span className="font-bold">{isActive ? label : 'Idle'}</span>
               </span>
             </div>
+            {/* Day / night theme toggle. Persists via ThemeContext and applies
+                to every app page henceforth; the landing/splash keeps its own
+                look and is unaffected. */}
+            <button
+              onClick={toggleTheme}
+              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-pressed={isDark}
+              className="flex items-center justify-center w-9 h-9 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors active:scale-90"
+            >
+              <span className="material-symbols-outlined text-xl">
+                {isDark ? 'light_mode' : 'dark_mode'}
+              </span>
+            </button>
             <div className="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center text-primary font-bold overflow-hidden border border-outline-variant">
               PA
             </div>

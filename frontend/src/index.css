@@ -2,12 +2,120 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Material-3 design tokens as CSS custom properties. The Tailwind color scale
+ * (tailwind.config.js) points at these via `rgb(var(--color-x) / <alpha>)`, so
+ * flipping the single `.dark` class on <html> re-themes every token-based
+ * component at once. `:root` holds the light values; `.dark` overrides only the
+ * tokens that change (the `*-fixed` M3 tokens are constant across schemes by
+ * design, so they are not repeated below).
+ *
+ * The landing/splash screen does NOT use these tokens (it has its own
+ * splash.css with hardcoded cinematic colors), so it is intentionally
+ * unaffected by the theme toggle.
+ *
+ * Values are stored as space-separated RGB channels — not hex — because the
+ * `<alpha-value>` opacity-modifier syntax the components use requires channels.
+ */
+:root {
+    --color-secondary-fixed: 132 245 238;
+    --color-surface-container-highest: 224 227 229;
+    --color-on-primary-fixed: 0 27 60;
+    --color-on-tertiary-fixed-variant: 0 74 120;
+    --color-on-primary-container: 134 160 205;
+    --color-inverse-surface: 45 49 51;
+    --color-on-error-container: 147 0 10;
+    --color-surface-container-high: 229 233 235;
+    --color-tertiary-fixed: 207 229 255;
+    --color-inverse-primary: 173 199 247;
+    --color-error: 186 26 26;
+    --color-secondary-fixed-dim: 102 216 210;
+    --color-surface: 247 250 252;
+    --color-primary-fixed-dim: 173 199 247;
+    --color-on-background: 24 28 30;
+    --color-tertiary-container: 0 56 93;
+    --color-surface-variant: 224 227 229;
+    --color-outline-variant: 196 198 207;
+    --color-on-surface: 24 28 30;
+    --color-on-tertiary-fixed: 0 29 52;
+    --color-on-primary-fixed-variant: 45 71 111;
+    --color-on-surface-variant: 67 71 78;
+    --color-surface-tint: 69 95 136;
+    --color-surface-container-low: 241 244 246;
+    --color-error-container: 255 218 214;
+    --color-primary-container: 26 54 93;
+    --color-inverse-on-surface: 238 241 243;
+    --color-surface-container-lowest: 255 255 255;
+    --color-background: 247 250 252;
+    --color-on-error: 255 255 255;
+    --color-surface-dim: 215 218 220;
+    --color-surface-bright: 247 250 252;
+    --color-surface-container: 235 238 240;
+    --color-on-secondary-fixed-variant: 0 80 77;
+    --color-secondary: 0 106 102;
+    --color-tertiary: 0 34 59;
+    --color-on-primary: 255 255 255;
+    --color-on-secondary-container: 0 111 106;
+    --color-primary: 0 32 69;
+    --color-on-secondary: 255 255 255;
+    --color-outline: 116 119 127;
+    --color-on-tertiary-container: 79 164 237;
+    --color-on-tertiary: 255 255 255;
+    --color-on-secondary-fixed: 0 32 30;
+    --color-tertiary-fixed-dim: 153 203 255;
+    --color-secondary-container: 129 242 235;
+    --color-primary-fixed: 214 227 255;
+}
+
+.dark {
+    --color-surface-container-highest: 49 53 57;
+    --color-on-primary-container: 214 227 255;
+    --color-inverse-surface: 226 226 230;
+    --color-on-error-container: 255 218 214;
+    --color-surface-container-high: 38 42 46;
+    --color-inverse-primary: 69 95 136;
+    --color-error: 255 180 171;
+    --color-surface: 16 20 24;
+    --color-on-background: 226 226 230;
+    --color-tertiary-container: 0 74 120;
+    --color-surface-variant: 67 71 78;
+    --color-outline-variant: 67 71 78;
+    --color-on-surface: 226 226 230;
+    --color-on-surface-variant: 195 198 207;
+    --color-surface-tint: 173 199 247;
+    --color-surface-container-low: 24 28 32;
+    --color-error-container: 147 0 10;
+    --color-primary-container: 45 71 111;
+    --color-inverse-on-surface: 45 49 51;
+    --color-surface-container-lowest: 11 15 18;
+    --color-background: 16 20 24;
+    --color-on-error: 105 0 5;
+    --color-surface-dim: 16 20 24;
+    --color-surface-bright: 54 58 62;
+    --color-surface-container: 28 32 36;
+    --color-secondary: 102 216 210;
+    --color-tertiary: 153 203 255;
+    --color-on-primary: 20 47 82;
+    --color-on-secondary-container: 132 245 238;
+    --color-primary: 173 199 247;
+    --color-on-secondary: 0 55 52;
+    --color-outline: 141 145 153;
+    --color-on-tertiary-container: 207 229 255;
+    --color-on-tertiary: 0 51 84;
+    --color-secondary-container: 0 80 77;
+}
+
 @layer base {
   .material-symbols-outlined {
     font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
   }
   body {
     min-height: max(884px, 100dvh);
+    /* Themed viewport backdrop so the app's dark mode covers gaps between
+       page-level panels (the splash paints its own full-screen background, so
+       this is never visible during the landing intro). */
+    background-color: rgb(var(--color-background));
+    color: rgb(var(--color-on-surface));
   }
 }
 
@@ -18,9 +126,9 @@
   }
   
   .glass-panel {
-    background: rgba(255, 255, 255, 0.7);
+    background: rgb(var(--color-surface-container-lowest) / 0.7);
     backdrop-filter: blur(20px);
-    border: 1px solid rgba(226, 232, 240, 0.8);
+    border: 1px solid rgb(var(--color-outline-variant) / 0.5);
   }
   
   .shimmer-ai {
@@ -33,6 +141,29 @@
 @layer utilities {
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
+  }
+}
+
+/* Brief color crossfade applied to the whole tree only while the theme is being
+   switched (the toggle adds `.theme-transition` to <html> then removes it), so
+   normal hover/state color changes stay snappy. */
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    color 0.3s ease,
+    fill 0.3s ease,
+    stroke 0.3s ease !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .theme-transition,
+  .theme-transition *,
+  .theme-transition *::before,
+  .theme-transition *::after {
+    transition: none !important;
   }
 }
 

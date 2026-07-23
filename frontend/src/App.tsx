@@ -6,6 +6,7 @@ import ResearchLibrary from './components/ResearchLibrary';
 import PaperSummary from './components/PaperSummary';
 import WorkspaceDetail from './components/WorkspaceDetail';
 import { AgentActivityProvider } from './context/AgentActivityContext';
+import { ThemeProvider } from './context/ThemeContext';
 import SplashScreen from './components/splash/SplashScreen';
 
 // Shown once per browser session, so navigating routes or refreshing mid-session
@@ -58,18 +59,20 @@ function App() {
           className={stage === 'reveal' ? 'pp-app-enter' : undefined}
           style={stage === 'reveal' ? { pointerEvents: 'none' } : undefined}
         >
-          <AgentActivityProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/" element={<Layout />}>
-                  <Route index element={<DiscoveryFeed />} />
-                  <Route path="library" element={<ResearchLibrary />} />
-                  <Route path="paper/:paperId" element={<PaperSummary />} />
-                  <Route path="workspace/:workspaceId" element={<WorkspaceDetail />} />
-                </Route>
-              </Routes>
-            </BrowserRouter>
-          </AgentActivityProvider>
+          <ThemeProvider>
+            <AgentActivityProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/" element={<Layout />}>
+                    <Route index element={<DiscoveryFeed />} />
+                    <Route path="library" element={<ResearchLibrary />} />
+                    <Route path="paper/:paperId" element={<PaperSummary />} />
+                    <Route path="workspace/:workspaceId" element={<WorkspaceDetail />} />
+                  </Route>
+                </Routes>
+              </BrowserRouter>
+            </AgentActivityProvider>
+          </ThemeProvider>
         </div>
       )}
     </>
