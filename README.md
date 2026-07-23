@@ -1,3 +1,5 @@
+
+
 # 🚀 PaperPilot AI
 
 > An autonomous research assistant that discovers academic papers, ranks them, indexes them, and lets you chat with them — grounded in the actual paper text, not vibes.
@@ -7,6 +9,30 @@ PaperPilot AI searches arXiv and Semantic Scholar, ranks results with a weighted
 For the full architecture, current technical debt, and engineering conventions, see **[CLAUDE.md](./CLAUDE.md)** — it's the source of truth for how this repository actually works today, kept in sync with the code rather than aspirational.
 
 ---
+
+<div align="center">
+
+# ⚡ 60-Second Product Tour
+
+See how PaperPilot transforms research from hours into minutes.
+
+🔍 Search Papers
+&nbsp;&nbsp;→&nbsp;&nbsp;
+🧠 Rank Intelligently
+&nbsp;&nbsp;→&nbsp;&nbsp;
+📄 Index Automatically
+&nbsp;&nbsp;→&nbsp;&nbsp;
+💬 Chat with Confidence
+
+<br>
+
+https://github.com/user-attachments/assets/ab86b2e9-b0a3-4255-89aa-40338156caef
+
+</div>
+
+---
+
+
 
 ## Architecture at a glance
 
