@@ -1,10 +1,7 @@
 """Unit tests for the Planner Agent."""
 
-from unittest.mock import MagicMock
-import pytest
-from langchain_core.messages import AIMessage
 
-from paperpilot.agent.planner import PlannerAgent, ResearchPlan, PlanStep
+from paperpilot.agent.planner import PlannerAgent, ResearchPlan
 from tests.test_tutor import StubChatModel
 
 

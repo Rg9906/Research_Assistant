@@ -1,0 +1,10 @@
+# These settings power the "Sponsor" button on the GitHub repository.
+# Uncomment and fill in the platforms you actually use; remove the rest.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+github: [Rg9906]           # GitHub Sponsors username(s)
+# patreon:                 # Patreon username
+# open_collective:         # Open Collective slug
+# ko_fi:                   # Ko-fi username
+# tidelift:                # e.g. "pypi/paperpilot"
+# custom:                  # e.g. ["https://www.buymeacoffee.com/username"]

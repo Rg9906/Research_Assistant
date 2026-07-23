@@ -112,9 +112,16 @@ const DiscoveryFeed: React.FC = () => {
                     <span className="bg-surface-container-high text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded uppercase">{paper.venue || 'ARXIV'}</span>
                     <span className="text-xs text-outline font-mono-technical">Published {paper.publication_year}</span>
                     {/* Chat and summaries both require indexing the PDF, so a
-                        paper without one is abstract-only. Flag it here rather
-                        than letting the user discover it after two clicks. */}
-                    {!paper.pdf_url && (
+                        paper without one is abstract-only. Ranking now prefers
+                        openable papers (see search/availability.py), so this
+                        badge distinguishes the two states rather than being the
+                        first the user notices only after two clicks. */}
+                    {paper.pdf_url ? (
+                      <span className="flex items-center gap-1 bg-primary-container text-on-primary-container text-[10px] font-bold px-2 py-0.5 rounded uppercase">
+                        <span className="material-symbols-outlined text-[11px]">chat</span>
+                        Chat Ready
+                      </span>
+                    ) : (
                       <span className="flex items-center gap-1 bg-surface-container-high text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded uppercase">
                         <span className="material-symbols-outlined text-[11px]">lock</span>
                         No PDF

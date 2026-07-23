@@ -160,9 +160,17 @@ class Settings(BaseSettings):
     # session even when correctly paced, so a budget of 2 (1s + 2s) was enough
     # to lose an entire search. 3 buys 1s + 2s + 4s.
     semantic_scholar_max_retries: int = 3
-    search_weight_similarity: float = 0.5
-    search_weight_citations: float = 0.3
-    search_weight_recency: float = 0.2
+    # Ranking weights. PaperRanker normalizes these to sum to 1.0 if they don't,
+    # so the absolute values matter less than their ratios. Availability is
+    # weighted meaningfully (0.25) but below similarity: an openable paper is
+    # strongly preferred, yet a far-more-relevant one that happens to be
+    # abstract-only can still surface rather than being buried. Raise
+    # search_weight_availability toward similarity to make chattability nearly
+    # decisive; lower it to treat the PDF as a tiebreaker.
+    search_weight_similarity: float = 0.4
+    search_weight_citations: float = 0.2
+    search_weight_recency: float = 0.15
+    search_weight_availability: float = 0.25
     search_decay_rate: float = 0.05
 
     model_config = {

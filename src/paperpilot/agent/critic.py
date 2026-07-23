@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -112,7 +111,7 @@ class CriticAgent:
             logger.error("CriticAgent failed to parse critique report: %s. Raw content: %s", e, content)
 
             # Simple text parsing fallback if LLM returned plain text instead of JSON
-            approved = "APPROVED" in content.upper() and not "REJECTED" in content.upper()
+            approved = "APPROVED" in content.upper() and "REJECTED" not in content.upper()
             feedback = "APPROVED" if approved else f"REJECTED: {content}"
             return CritiqueReport(
                 grounding_passed=approved,

@@ -19,12 +19,11 @@ import logging
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 
 from paperpilot.agent.tutor import TutorAgent
 from paperpilot.agent.planner import PlannerAgent
 from paperpilot.agent.critic import CriticAgent
-from paperpilot.core.models import PaperMetadata
 from paperpilot.graph.state import AgentState
 from paperpilot.pipeline import DocumentPipeline
 from paperpilot.search.agent import SearchAgent
@@ -140,8 +139,6 @@ class AgentNodes:
 
     def retriever_node(self, state: AgentState) -> dict[str, Any]:
         """Indexes selected papers and retrieves context chunks."""
-        selected = state.get("selected_papers", [])
-
         current_idx = state.get("current_step_idx", 0)
         plan_nodes = state.get("plan_nodes", [])
         plan_queries = state.get("plan_queries", [])

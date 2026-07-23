@@ -9,7 +9,6 @@ and do not require internet access or API credentials.
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
@@ -17,8 +16,6 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from tests.test_tutor import StubChatModel
 
 from paperpilot.agent.tutor import TutorAgent
-from paperpilot.agent.planner import PlannerAgent
-from paperpilot.agent.critic import CriticAgent
 from paperpilot.core.models import PaperMetadata, PaperSource, TextChunk
 from paperpilot.graph.builder import compile_agent_graph
 from paperpilot.graph.nodes import AgentNodes

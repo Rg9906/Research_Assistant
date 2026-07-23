@@ -6,8 +6,7 @@ and grounded QA directly to LlamaIndex via PaperSessionManager.
 
 import logging
 import re
-from pathlib import Path
-from typing import Any, List
+from typing import Any
 from uuid import UUID, uuid4
 
 from paperpilot.config import get_settings

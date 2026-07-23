@@ -8,7 +8,6 @@ richest fields), and ranking orchestration.
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from paperpilot.core.models import PaperMetadata, PaperSource
 from paperpilot.search.agent import SearchAgent

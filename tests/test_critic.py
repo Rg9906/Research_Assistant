@@ -1,7 +1,6 @@
 """Unit tests for the Critic Agent."""
 
 from uuid import uuid4
-import pytest
 
 from paperpilot.agent.critic import CriticAgent, CritiqueReport
 from paperpilot.core.models import TextChunk

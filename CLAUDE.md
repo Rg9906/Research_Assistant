@@ -141,7 +141,17 @@ RAG implementation, and do not add a second retriever — extend
   even when correctly paced, so both halves are load-bearing.
 - Summaries: `rag_summary_top_k` (10). Summaries retrieve more widely than chat
   and with the similarity cutoff **disabled** — see §7 for why.
-- Search ranking weights: `search_weight_similarity/citations/recency` (auto-normalized to sum to 1 in `PaperRanker.__init__` if they don't), `search_decay_rate`.
+- Search ranking weights: `search_weight_similarity/citations/recency/availability`
+  (auto-normalized to sum to 1 in `PaperRanker.__init__` if they don't),
+  `search_decay_rate`. **Availability** (`search/availability.py`) grades how
+  likely a result's PDF can actually be downloaded and indexed — open
+  repository (arXiv/bioRxiv/ACL/…) > direct `.pdf` > publisher landing page >
+  none — so chattable papers rank above abstract-only ones. `SearchAgent`
+  also *recovers* a downloadable link (`apply_best_pdf_url`): a Semantic
+  Scholar record with only an `openAccessPdf` landing page but an ArXiv id gets
+  rewritten to the arxiv.org PDF before ranking and before the API response, so
+  the UI's "Chat Ready"/"No PDF" flag and `/api/papers/process` see the same
+  resolved URL.
 - **LLM provider selection (`paperpilot/llm/factory.py`)**: three providers are
   supported — `gemini` (aliases: `google`, `google-genai`), `groq`, `openai` —
   with keys `gemini_api_key`/`groq_api_key`/`openai_api_key` and models

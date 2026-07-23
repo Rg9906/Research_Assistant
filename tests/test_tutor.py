@@ -8,12 +8,11 @@ returns correct responses without making actual external API calls.
 
 from uuid import uuid4
 
-import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatResult, ChatGeneration
 
-from paperpilot.agent.tutor import SYSTEM_PROMPT_TEMPLATE, TutorAgent
+from paperpilot.agent.tutor import TutorAgent
 from paperpilot.core.models import TextChunk
 
 

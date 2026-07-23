@@ -11,6 +11,7 @@ import logging
 import re
 
 from paperpilot.core.models import PaperMetadata, PaperSource
+from paperpilot.search.availability import apply_best_pdf_url
 from paperpilot.search.providers import SearchProvider
 from paperpilot.search.ranker import PaperRanker
 
@@ -74,7 +75,16 @@ class SearchAgent:
         merged_candidates = self._deduplicate_and_merge(raw_candidates)
         logger.info("De-duplication complete: reduced %d raw papers to %d unique papers.", len(raw_candidates), len(merged_candidates))
 
-        # 3. Rank merged papers
+        # 2b. Recover the best downloadable PDF URL for each paper (e.g. derive
+        # an arxiv.org link for a Semantic Scholar record that only had a
+        # publisher landing page). Done once here so the ranker, the API
+        # response, and /api/papers/process all see the same resolved link —
+        # otherwise the UI would flag a paper "chattable" via a URL the process
+        # endpoint never receives. Mutates in place after the merge is settled.
+        for candidate in merged_candidates:
+            apply_best_pdf_url(candidate)
+
+        # 3. Rank merged papers (availability is now one of the scoring factors)
         ranked_results = self.ranker.rank_papers(query, merged_candidates)
 
         # 4. Limit to top_n

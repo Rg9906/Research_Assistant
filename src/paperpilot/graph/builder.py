@@ -9,6 +9,7 @@ with in-memory persistence.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph

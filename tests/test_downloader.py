@@ -1,7 +1,6 @@
 """Unit tests for the PDFDownloader."""
 
 import urllib.error
-from pathlib import Path
 from uuid import uuid4
 
 import fitz

@@ -1,7 +1,6 @@
 """Production unit tests for PaperSession & PaperSessionManager."""
 
 import pytest
-from uuid import uuid4
 from pathlib import Path
 
 from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
@@ -9,10 +8,11 @@ from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 from paperpilot.core.models import PaperMetadata
 from paperpilot.services.paper_chat.session import (
     MultiPaperRetriever,
+    PaperSession,
     PaperSessionManager,
     compute_pdf_sha256,
 )
-from paperpilot.services.paper_chat.exceptions import PDFDownloadError, PaperChatException
+from paperpilot.services.paper_chat.exceptions import PDFDownloadError
 
 
 def test_compute_pdf_sha256(tmp_path: Path):
@@ -117,8 +117,6 @@ def _page_node(node_id: str, page: str, text: str, start: int = 0) -> TextNode:
 
 
 def _session_with_pages(pages: list[tuple[str, str, str]]) -> "PaperSession":
-    from paperpilot.services.paper_chat.session import PaperSession
-
     docs = {nid: _page_node(nid, page, text) for nid, page, text in pages}
     session = PaperSession.__new__(PaperSession)  # bypass __init__ (needs settings/PDF)
     session.index = _IndexWithDocstore([], docs)

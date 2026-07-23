@@ -9,7 +9,6 @@ and that rate-limiting and connection failures are handled gracefully.
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
 from paperpilot.core.models import PaperSource
 from paperpilot.search.providers import ArxivProvider, SemanticScholarProvider
 

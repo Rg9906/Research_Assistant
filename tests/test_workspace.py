@@ -1,7 +1,5 @@
 """Unit tests for the WorkspaceManager."""
 
-import shutil
-from datetime import datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 

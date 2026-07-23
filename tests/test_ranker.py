@@ -51,11 +51,15 @@ class TestPaperRanker:
         # 2. Instantiate ranker with exact weights
         # w_sim = 0.5, w_cit = 0.3, w_rec = 0.2
         # decay_rate = 0.05
+        # Availability weight explicitly zeroed so this test exercises only the
+        # sim/cit/rec math it was written for; PDF availability is covered
+        # separately in test_availability.py and below.
         ranker = PaperRanker(
             engine=mock_engine,
             weight_similarity=0.5,
             weight_citations=0.3,
             weight_recency=0.2,
+            weight_availability=0.0,
             decay_rate=0.05,
         )
 
@@ -106,11 +110,13 @@ class TestPaperRanker:
             weight_similarity=1.0,
             weight_citations=0.6,
             weight_recency=0.4,
+            weight_availability=0.0,
         )
 
         assert ranker.w_sim == 0.5
         assert ranker.w_cit == 0.3
         assert ranker.w_rec == 0.2
+        assert ranker.w_avail == 0.0
 
     def test_ranking_missing_metadata(self):
         """Missing publication years or citation counts should fall back gracefully."""
@@ -123,6 +129,7 @@ class TestPaperRanker:
             weight_similarity=0.5,
             weight_citations=0.3,
             weight_recency=0.2,
+            weight_availability=0.0,
         )
 
         paper = _make_paper("Paper with empty metadata", year=None, citations=None)
@@ -140,3 +147,39 @@ class TestPaperRanker:
         mock_engine = MagicMock()
         ranker = PaperRanker(engine=mock_engine)
         assert ranker.rank_papers("test", []) == []
+
+    def test_availability_lifts_a_chattable_paper(self):
+        """With equal relevance/citations/recency, the paper with a downloadable
+        PDF must rank above an abstract-only one."""
+        mock_engine = MagicMock()
+        # Identical similarity for both papers so availability is the only
+        # differentiator.
+        mock_engine.embed_query.return_value = np.array([1.0, 0.0], dtype=np.float32)
+        mock_engine.embed_texts.return_value = np.array(
+            [[1.0, 0.0], [1.0, 0.0]], dtype=np.float32
+        )
+
+        ranker = PaperRanker(
+            engine=mock_engine,
+            weight_similarity=0.5,
+            weight_citations=0.0,
+            weight_recency=0.0,
+            weight_availability=0.5,
+        )
+
+        current_year = datetime.now().year
+        no_pdf = PaperMetadata(
+            title="Abstract only", publication_year=current_year, citation_count=10
+        )
+        with_pdf = PaperMetadata(
+            title="Openable on arXiv",
+            publication_year=current_year,
+            citation_count=10,
+            pdf_url="https://arxiv.org/pdf/1706.03762.pdf",
+        )
+
+        # Feed the unavailable paper first to prove ordering comes from scoring,
+        # not input order.
+        ranked = ranker.rank_papers("transformer", [no_pdf, with_pdf])
+        assert ranked[0][0].title == "Openable on arXiv"
+        assert ranked[1][0].title == "Abstract only"

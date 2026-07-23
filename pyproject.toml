@@ -42,6 +42,7 @@ dependencies = [
 dev = [
     "pytest>=8.0,<9.0",
     "pytest-cov>=5.0,<6.0",
+    "ruff>=0.6,<1.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -50,3 +51,22 @@ packages = ["src/paperpilot"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+# Match the project's minimum supported interpreter.
+target-version = "py311"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Default rule set (pyflakes + a curated slice of pycodestyle). Kept
+# deliberately lean so the baseline is green for contributors on day one;
+# tighten by adding rule codes (e.g. "I" for import sorting, "UP" for pyupgrade)
+# in a focused follow-up rather than dumping a wall of violations on the first PR.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# app/api.py intentionally imports after calling paperpilot.net setup, which
+# must run before anything opens a TLS connection or loads a model (see
+# CLAUDE.md §2 and the module's own comments). E402 is expected here.
+"src/app/api.py" = ["E402"]

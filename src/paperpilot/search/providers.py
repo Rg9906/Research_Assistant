@@ -19,7 +19,7 @@ import logging
 import time
 from contextlib import contextmanager
 from typing import Iterator, Protocol
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import arxiv
 import httpx
