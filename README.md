@@ -34,6 +34,27 @@ https://github.com/user-attachments/assets/ab86b2e9-b0a3-4255-89aa-40338156caef
 
 
 
+## How it works
+
+```mermaid
+flowchart LR
+    Q[Research question] --> S[Search arXiv and Semantic Scholar in parallel]
+    S --> M[Merge duplicates by DOI then arXiv ID then title similarity]
+    M --> R[Rank by similarity, PDF availability, citations and recency]
+    R --> D[Download selected PDFs and parse with PyMuPDF]
+    D --> I[Chunk, embed with bge-small and index with LlamaIndex]
+    I --> C[Chat grounded in the paper text]
+```
+
+Default ranking weights (all configurable in `.env`): semantic similarity 0.40, PDF availability 0.25, citation impact 0.20, recency 0.15.
+
+<p align="center">
+  <img src="docs/screenshots/landing.png" alt="PaperPilot AI landing screen" width="85%">
+  <br><sub><b>Landing screen</b> of the React frontend, running locally.</sub>
+</p>
+
+---
+
 ## Architecture at a glance
 
 ```
@@ -50,6 +71,7 @@ Queries arXiv and Semantic Scholar in parallel, merges duplicate results (DOI �
 - **Semantic similarity** — cosine similarity between the query and each paper's title+abstract embedding
 - **Citation impact** — log-normalized citation count
 - **Recency** — exponential age decay
+- **PDF availability** — a boost for papers whose PDF is actually downloadable, so the top results are ones you can chat with
 
 ### Document Intelligence (RAG)
 Selected papers are downloaded, parsed with PyMuPDF, chunked, embedded (`BAAI/bge-small-en-v1.5`), and indexed with LlamaIndex (`VectorStoreIndex`), persisted per-paper under `storage/papers/paper_<id>/` with a content-hash fingerprint so re-processing an unchanged PDF just loads the cached index. Chat is grounded via a `condense_plus_context` chat engine; multi-paper workspaces fan a query out across every paper's index and merge results by score.
